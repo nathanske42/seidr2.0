@@ -1,31 +1,22 @@
-#%%###########################################################################
 """
-A class to do useful fiber and photonic lantern things, such as mode finding, 
-coupling, plotting, generate random fields, RSoft integration etc.
+A class to do useful fiber and photonic lantern things, such as mode finding, coupling, etc.
 
 This class uses
 ofiber https://ofiber.readthedocs.io
 polarTransform https://polartransform.readthedocs.io/en/latest/getting-started.html
 """
-
-#%%###########################################################################
-## Import Libraries and Modules
-import jax.numpy as np
+import numpy as np
 import ofiber
 import matplotlib.pyplot as plt
 import polarTransform
-# from viewRSoftData import *
+from viewRSoftData import *
 from scipy import ndimage
 from pathlib import Path
+import os
 
-#%%###########################################################################
 class lanternfiber:
-
-    ##########################################################################
-    def __init__(self, n_core=None, n_cladding=None, 
-                 core_radius=None, wavelength=None, nmodes=19, 
-                 nwgs=19, datadir='./'):
-        
+    def __init__(self, n_core=None, n_cladding=None, core_radius=None, wavelength=None, nmodes=1, nwgs=1,
+                 datadir='./'):
         self.n_core = n_core
         self.n_cladding = n_cladding
         self.core_radius = core_radius
@@ -34,7 +25,7 @@ class lanternfiber:
         self.allmodes_l = None
         self.allmodes_m = None
         self.nmodes = nmodes
-        self.nwgs = nwgs #?
+        self.nwgs = nwgs
         self.max_r = None
         self.datadir = datadir
 
@@ -58,19 +49,12 @@ class lanternfiber:
         self.allBatfileNames = []
 
         if n_core is not None:
-            self.NA = ofiber.numerical_aperture(n_core, n_cladding)
-            self.V = ofiber.V_parameter(core_radius, self.NA, wavelength)
+            self.NA = self.calc_numerical_aperture(n_core, n_cladding)
+            self.V = self.calc_V_parameter(core_radius, self.NA, wavelength)
 
-        # If the order of Rsoft monitor objects does not match the 
-        # conventional waveguide order, specify order here. Using Rsoft 
-        # numbering (so starts at 1).
-        self.monitor_order = [10, 9, 14, 
-                              15, 11, 6, 
-                              5, 4, 3, 
-                              8, 13, 18, 
-                              19, 16, 17, 
-                              12, 7, 2, 
-                              1]
+        # If the order of Rsoft monitor objects does not match the conventional waveguide order,
+        # specify order here. Using rsoft numbering (so starts at 1).
+        self.monitor_order = [10, 9, 14, 15, 11, 6, 5, 4, 3, 8, 13, 18, 19, 16, 17, 12, 7, 2, 1]
 
         # Specify mode indices
         self.LP_modes = np.array([[0,1],
@@ -80,6 +64,8 @@ class lanternfiber:
                              [-1,1],
                              [1,2],
                              [-1,2],
+                             [1, 3],
+                             [-1, 3],
                              [2,1],
                              [-2,1],
                              [2,2],
@@ -91,12 +77,15 @@ class lanternfiber:
                              [4,1],
                              [-4,1],
                              [5,1],
-                             [-5,1]
+                             [-5,1],
+                             [6, 1],
+                             [-6, 1]
                              ])
 
         # Make text mode labels
         modelabels = []
         for k in range(self.nmodes):
+            print(k)
             if k < 3:  # Assumes first 3 modes are LP0x modes
                 label = 'LP%d%d' % (self.LP_modes[k, 0], self.LP_modes[k, 1])
             else:
@@ -109,9 +98,16 @@ class lanternfiber:
         self.modelabels = modelabels
 
 
-    ##########################################################################
-    def find_fiber_modes(self, max_l=100, return_n_unique=False, 
-                         verbose=True):
+    def calc_numerical_aperture(self, n_core, n_cladding):
+        return np.sqrt(n_core ** 2 - n_cladding ** 2)
+
+
+    def calc_V_parameter(self, core_radius, NA, wavelength):
+        V = 2 * np.pi / wavelength * core_radius * NA
+        return V
+
+
+    def find_fiber_modes(self, max_l=100, return_n_unique=False, verbose=True):
         """
         Finds LP modes for the specified fiber.
 
@@ -120,14 +116,12 @@ class lanternfiber:
         max_l
             Maximum number of l modes to find (can be arbitrarily large)
         """
-        self.NA = ofiber.numerical_aperture(self.n_core, self.n_cladding)
-        self.V = ofiber.V_parameter(self.core_radius, self.NA, self.wavelength)
+        self.NA = self.calc_numerical_aperture(self.n_core, self.n_cladding)
+        self.V = self.calc_V_parameter(self.core_radius, self.NA, self.wavelength)
 
         allmodes_b = []
         allmodes_l = []
         allmodes_m = []
-
-        ## Check if modes 1:max_l are guided by fibre
         for l in range(max_l):
             cur_b = ofiber.LP_mode_values(self.V, l)
             if len(cur_b) == 0:
@@ -143,37 +137,33 @@ class lanternfiber:
         nLPmodes = len(allmodes_b)
         # print('Total number of LP modes found: %d' % nLPmodes)
         l = np.asarray(allmodes_l)
-
-        total_unique_modes = len(np.where(l == 0)[0]) \
-            + len(np.where(l > 0)[0])*2
-
+        total_unique_modes = len(np.where(l == 0)[0]) + len(np.where(l > 0)[0])*2
+        if verbose:
+            print('Total number of unique modes found: %d' % total_unique_modes)
         self.allmodes_b = allmodes_b
         self.allmodes_l = allmodes_l
         self.allmodes_m = allmodes_m
         self.nLPmodes = nLPmodes
 
-        # print
-        if verbose:
-            print('Total number of unique modes found: %d' % total_unique_modes)
-            print(f"len(allmodes_b): {len(allmodes_b)}")
-            print(f"len(allmodes_l): {len(allmodes_l)}")
-            print(f"len(allmodes_m): {len(allmodes_m)}")
-            print(f"nLPmodes: {nLPmodes}")
+        l = allmodes_l
+        m = allmodes_m
+        lp_mode_list = []
+        for k in range(nLPmodes):
+            lp_mode_list.append([l[k], m[k]])
+            if l[k] > 0:
+                lp_mode_list.append([-1 * l[k], m[k]])
+        self.lp_mode_list = lp_mode_list
 
         # ADDED - HACK?
         self.nmodes = total_unique_modes
-        
         if return_n_unique:
             return total_unique_modes
 
 
-    ##########################################################################
-    def make_fiber_modes(self, max_r=2, npix=100, 
-                         zlim=0.04, show_plots=False, normtosum=True, 
-                         rotate_mode_angle=None):
+    def make_fiber_modes(self, max_r=2, npix=100, zlim=0.04, show_plots=False,
+                         normtosum=True, rotate_mode_angle=None):
         """
-        Calculate the LP mode fields, and store as polar and cartesian 
-        amplitude maps
+        Calculate the LP mode fields, and store as polar and cartesian amplitude maps
 
         Parameters
         ----------
@@ -189,9 +179,7 @@ class lanternfiber:
             If True, normalise each mode field so summed power = 1
         """
 
-        # Radial positions, normalised so core_radius = 1
-        r = np.linspace(0, max_r, npix)
-
+        r = np.linspace(0, max_r, npix) # Radial positions, normalised so core_radius = 1
         self.max_r = max_r
         self.npix = npix
         self.allmodefields_cos_polar = []
@@ -204,13 +192,9 @@ class lanternfiber:
         self.microns_per_pixel = array_size_microns / (npix*2)
 
         for mode_to_calc in range(self.nLPmodes):
-
-            field_1d = ofiber.LP_radial_field(self.V, 
-                                              self.allmodes_b[mode_to_calc],
-                                              self.allmodes_l[mode_to_calc], 
-                                              r)
-            # TODO - LP02 comes out with core being pi phase and ring being 0 phase... 
-            # investigate this.
+            field_1d = ofiber.LP_radial_field(self.V, self.allmodes_b[mode_to_calc],
+                                              self.allmodes_l[mode_to_calc], r)
+            #TODO - LP02 comes out with core being pi phase and ring being 0 phase... investigate this.
 
             phivals = np.linspace(0, 2*np.pi, npix)
             phi_cos = np.cos(self.allmodes_l[mode_to_calc] * phivals)
@@ -228,35 +212,26 @@ class lanternfiber:
             field_cos = np.nan_to_num(field_cos)
             field_sin = np.nan_to_num(field_sin)
 
-            field_cos_cart, d = \
-                polarTransform.convertToCartesianImage(field_cos.T)
-            field_sin_cart, d = \
-                polarTransform.convertToCartesianImage(field_sin.T)
+            field_cos_cart, d = polarTransform.convertToCartesianImage(field_cos.T)
+            field_sin_cart, d = polarTransform.convertToCartesianImage(field_sin.T)
 
             if rotate_mode_angle is not None:
                 print('Warning: rotating mode fields by %f degrees. ONLY APPLIES TO CARTESIAN FIELDS!' %
                       rotate_mode_angle)
-                field_cos_cart = ndimage.rotate(field_cos_cart, 
-                                                rotate_mode_angle, 
-                                                reshape=False)
-                field_sin_cart = ndimage.rotate(field_sin_cart, 
-                                                rotate_mode_angle, 
-                                                reshape=False)
+                field_cos_cart = ndimage.rotate(field_cos_cart, rotate_mode_angle, reshape=False)
+                field_sin_cart = ndimage.rotate(field_sin_cart, rotate_mode_angle, reshape=False)
 
             if normtosum:
                 field_cos = field_cos / np.sqrt(np.sum(field_cos**2))
                 field_sin = field_sin / np.sqrt(np.sum(field_sin**2))
-                field_cos_cart = field_cos_cart \
-                    / np.sqrt(np.sum(field_cos_cart**2))
-                field_sin_cart = field_sin_cart \
-                    / np.sqrt(np.sum(field_sin_cart**2))
+                field_cos_cart = field_cos_cart / np.sqrt(np.sum(field_cos_cart**2))
+                field_sin_cart = field_sin_cart / np.sqrt(np.sum(field_sin_cart**2))
 
             self.allmodefields_cos_polar.append(field_cos)
             self.allmodefields_cos_cart.append(field_cos_cart)
             self.allmodefields_sin_polar.append(field_sin)
             self.allmodefields_sin_cart.append(field_sin_cart)
             self.allmodefields_rsoftorder.append(field_cos_cart)
-
             if self.allmodes_l[mode_to_calc] > 0:
                 self.allmodefields_rsoftorder.append(field_sin_cart)
 
@@ -265,10 +240,7 @@ class lanternfiber:
                 plt.pause(0.5)
 
 
-
-    ##########################################################################
-    def plot_fiber_modes(self, mode_to_plot, zlim=0.04, 
-                         fignum=1):
+    def plot_fiber_modes(self, mode_to_plot, zlim=0.04, fignum=1):
         """
         Make a plot of the cos and sin amplitudes of a given mode
 
@@ -279,101 +251,64 @@ class lanternfiber:
         zlim
             Maximum value to plot
         """
-
         plt.figure(fignum)
         plt.clf()
-
         plt.subplot(121)
         sz = self.max_r * self.core_radius
-
-        plt.imshow(self.allmodefields_cos_cart[mode_to_plot], 
-                   extent=(-sz, sz, -sz, sz), 
-                   cmap='bwr',
+        plt.imshow(self.allmodefields_cos_cart[mode_to_plot], extent=(-sz, sz, -sz, sz), cmap='bwr',
                    vmin=-zlim, vmax=zlim)
-        
-        plt.xlabel('Position ($\mu$m)')
-        plt.ylabel('Position ($\mu$m)')
-        plt.title('Mode l=%d, m=%d (cos)' % (self.allmodes_l[mode_to_plot], 
-                                             self.allmodes_m[mode_to_plot]))
-        
-        core_circle = plt.Circle((0,0), self.core_radius, 
-                                 color='k', fill=False, 
-                                 linestyle='--', alpha=0.2)
+        plt.xlabel(r'Position ($\mu$m)')
+        plt.ylabel(r'Position ($\mu$m)')
+        plt.title('Mode l=%d, m=%d (cos)' % (self.allmodes_l[mode_to_plot], self.allmodes_m[mode_to_plot]))
+        core_circle = plt.Circle((0,0), self.core_radius, color='k', fill=False, linestyle='--', alpha=0.2)
         plt.gca().add_patch(core_circle)
-
         plt.subplot(122)
         sz = self.max_r * self.core_radius
-
-        plt.imshow(self.allmodefields_sin_cart[mode_to_plot], 
-                   extent=(-sz, sz, -sz, sz), cmap='bwr',
+        plt.imshow(self.allmodefields_sin_cart[mode_to_plot], extent=(-sz, sz, -sz, sz), cmap='bwr',
                    vmin=-zlim, vmax=zlim)
-        
-        plt.xlabel('Position ($\mu$m)')
-        plt.title('Mode l=%d, m=%d (sin)' % (self.allmodes_l[mode_to_plot], 
-                                             self.allmodes_m[mode_to_plot]))
-        
-        core_circle = plt.Circle((0,0), self.core_radius, 
-                                 color='k', fill=False, 
-                                 linestyle='--', alpha=0.2)
+        plt.xlabel(r'Position ($\mu$m)')
+        plt.title('Mode l=%d, m=%d (sin)' % (self.allmodes_l[mode_to_plot], self.allmodes_m[mode_to_plot]))
+        core_circle = plt.Circle((0,0), self.core_radius, color='k', fill=False, linestyle='--', alpha=0.2)
         plt.gca().add_patch(core_circle)
-
         plt.pause(0.001)
-        print('LP mode %d, %d' % (self.allmodes_l[mode_to_plot], 
-                                  self.allmodes_m[mode_to_plot]))
+        print('LP mode %d, %d' % (self.allmodes_l[mode_to_plot], self.allmodes_m[mode_to_plot]))
 
 
-    ##########################################################################
-    def plot_injection_field(self, field, fignum=1, 
-                             show_colorbar=True, logI=False, vmin=None):
-        
+    def plot_injection_field(self, field, fignum=1, show_colorbar=True, logI=False, vmin=None):
         sz = self.max_r * self.core_radius
-
         plt.figure(fignum)
         plt.clf()
         plt.subplot(211)
         if logI:
             im = np.abs(field)**2
             im = np.log10(im / np.max(im))
-            plt.imshow(im, 
-                       extent=(-sz, sz, -sz, sz), 
-                       vmin=vmin)
+            plt.imshow(im, extent=(-sz, sz, -sz, sz), vmin=vmin)
         else:
-            plt.imshow(np.abs(field), 
-                       extent=(-sz, sz, -sz, sz))
-        core_circle = plt.Circle((0,0), self.core_radius, color='w', 
-                                 fill=False, linestyle='--', alpha=0.2*3)
+            plt.imshow(np.abs(field), extent=(-sz, sz, -sz, sz))
+        core_circle = plt.Circle((0,0), self.core_radius, color='w', fill=False, linestyle='--', alpha=0.2*3)
         plt.gca().add_patch(core_circle)
-        plt.xlabel('Position ($\mu$m)')
-        plt.ylabel('Position ($\mu$m)')
+        plt.xlabel(r'Position ($\mu$m)')
+        plt.ylabel(r'Position ($\mu$m)')
         if logI:
             plt.title('log Intensity')
         else:
             plt.title('Amplitude')
         if show_colorbar:
             plt.colorbar()
-
         plt.subplot(212)
-        plt.imshow(np.angle(field), 
-                   extent=(-sz, sz, -sz, sz), 
-                   cmap='bwr', 
-                   vmin=-np.pi, vmax=np.pi)
-        core_circle = plt.Circle((0,0), self.core_radius, color='w', 
-                                 fill=False, linestyle='--', alpha=0.2*3)
+        plt.imshow(np.angle(field), extent=(-sz, sz, -sz, sz), cmap='bwr', vmin=-np.pi, vmax=np.pi)
+        core_circle = plt.Circle((0,0), self.core_radius, color='w', fill=False, linestyle='--', alpha=0.2*3)
         plt.gca().add_patch(core_circle)
-        plt.xlabel('Position ($\mu$m)')
-        plt.ylabel('Position ($\mu$m)')
+        plt.xlabel(r'Position ($\mu$m)')
+        plt.ylabel(r'Position ($\mu$m)')
         plt.title('Phase')
         if show_colorbar:
             plt.colorbar()
-
         plt.tight_layout()
 
 
-    ##########################################################################
-    def make_arb_input_field(self, field_type, power=1, 
-                             location=[0,0], sigma=3, phase=0, 
-                             add_to_existing=False, show_plots=False, 
-                             logI=False):
+    def make_arb_input_field(self, field_type, power=1, location=[0,0], sigma=3, phase=0, add_to_existing=False,
+                             show_plots=False, logI=False, colour='red'):
         """
         Make an arbitrary input field to inject into MM region
         Parameters
@@ -388,19 +323,29 @@ class lanternfiber:
         sigma
             Standard devitaion for Gaussian field
         add_to_existing : bool
-            If true, add to current field in self.input_field, rather than 
-            replacing it.
+            If true, add to current field in self.input_field, rather than replacing it.
         """
 
-        if field_type is 'gaussian':
+        if colour == 'red':
+            print('Hello')
+
+        if field_type == 'gaussian':
             posn = np.array(location) / self.microns_per_pixel
             xvals = np.linspace(-self.npix, self.npix, self.npix*2)
             xgrid,ygrid = np.meshgrid(xvals,xvals)
-            input_fld_ampl = np.exp(-( (xgrid-posn[0])**2 \
-                                      + (ygrid-posn[1])**2) / (2*sigma**2))
-            input_fld_ampl = input_fld_ampl \
-                / np.sqrt(np.sum(input_fld_ampl**2)) * np.sqrt(power)
+            input_fld_ampl = np.exp(-( (xgrid-posn[0])**2 + (ygrid-posn[1])**2) / (2*sigma**2))
+            input_fld_ampl = input_fld_ampl / np.sqrt(np.sum(input_fld_ampl**2)) * np.sqrt(power)
             input_fld_phase = np.zeros((self.npix*2,self.npix*2))
+            input_fld_phase = np.ones((self.npix*2,self.npix*2)) * phase
+            input_fld = input_fld_ampl * np.exp(1j * input_fld_phase)
+        if field_type == 'tophat':
+            posn = np.array(location) / self.microns_per_pixel
+            xvals = np.linspace(-self.npix, self.npix, self.npix*2)
+            xgrid,ygrid = np.meshgrid(xvals,xvals)
+            rgrid = np.sqrt(xgrid ** 2 + ygrid ** 2)
+            input_fld_ampl = np.zeros((self.npix * 2, self.npix * 2))
+            input_fld_ampl[rgrid < sigma] = 1
+            input_fld_ampl = input_fld_ampl / np.sqrt(np.sum(input_fld_ampl**2)) * np.sqrt(power)
             input_fld_phase = np.ones((self.npix*2,self.npix*2)) * phase
             input_fld = input_fld_ampl * np.exp(1j * input_fld_phase)
         else:
@@ -409,31 +354,22 @@ class lanternfiber:
 
         if add_to_existing:
             if self.input_field is None:
-                self.input_field = np.zeros((self.npix*2, self.npix*2), 
-                                            dtype='complex')
+                self.input_field = np.zeros((self.npix*2, self.npix*2), dtype='complex')
             self.input_field = self.input_field + input_fld
-            
         else:
             self.input_field = input_fld
 
         if show_plots:
             self.plot_injection_field(self.input_field, logI=logI)
-            core_circle = plt.Circle((0,0), self.core_radius, 
-                                     color='k', 
-                                     fill=False, 
-                                     linestyle='--', 
-                                     alpha=0.2)
+            core_circle = plt.Circle((0,0), self.core_radius, color='k', fill=False, linestyle='--', alpha=0.2)
             plt.gca().add_patch(core_circle)
 
     #
-    # def make_turb_input_field(self, power=1, r=8, r0=0.2, 
-    # inner_scale=1e-3, outer_scale=0.2):
+    # def make_turb_input_field(self, power=1, r=8, r0=0.2, inner_scale=1e-3, outer_scale=0.2):
     #     pass
     #
 
-    ##########################################################################
-    def calc_injection(self, input_field=None, mode_field=None, 
-                       mode_field_number=None, verbose=False):
+    def calc_injection(self, input_field=None, mode_field=None, mode_field_number=None, verbose=False):
         """
         Calculate the overlap integral between an input field and fiber mode.
         Parameters
@@ -452,50 +388,33 @@ class lanternfiber:
         overlap_int
             Total coupling efficiency
         """
-
         if (mode_field is not None) and (mode_field_number is not None):
             print('Error: cannot specify both mode_field and mode_field_number.')
             return
-        
         if input_field is None:
             input_field = self.input_field
-
         if mode_field_number is not None:
-            mode_field = self.make_complex_fld(
-                self.allmodefields_rsoftorder[mode_field_number])
-            
+            mode_field = self.make_complex_fld(self.allmodefields_rsoftorder[mode_field_number])
         # overlap_int = np.abs(np.sum(input_field*mode_field))**2 / \
         #               ( np.sum(np.abs(mode_field)**2) * np.sum(np.abs(input_field)**2) )
-
-        ## Complex overlap integral
-        overlap_int_complex = np.sum(input_field*mode_field) \
-                        / np.sqrt( np.sum(np.abs(mode_field)**2) \
-                              * np.sum(np.abs(input_field)**2) )
-        
-        ## Real overlap integral
+        overlap_int_complex = np.sum(input_field*mode_field) / \
+                      np.sqrt( np.sum(np.abs(mode_field)**2) * np.sum(np.abs(input_field)**2) )
         overlap_int = np.abs(overlap_int_complex)**2
 
         if verbose:
-            print('Total power in input field: %f' 
-                  % np.sum(np.abs(input_field)**2))
-            print('Total power in mode field: %f' 
-                  % np.sum(np.abs(mode_field)**2))
+            print('Total power in input field: %f' % np.sum(np.abs(input_field)**2))
+            print('Total power in mode field: %f' % np.sum(np.abs(mode_field)**2))
             print('Injection efficiency: %f' % overlap_int)
-            print('Coupled power: %f' 
-                  % (overlap_int*np.sum(np.abs(input_field)**2)))
+            print('Coupled power: %f' % (overlap_int*np.sum(np.abs(input_field)**2)))
 
         return overlap_int, overlap_int_complex
 
 
-    ##########################################################################
-    def calc_injection_multi(self, input_field=None, mode_field_numbers=None, 
-                             verbose=False, show_plots=False, fignum=1, 
-                             complex=False, logplot=False, modes_to_plot=None, 
-                             ylim=None, return_abspower=False):
+    def calc_injection_multi(self, input_field=None, mode_field_numbers=None, verbose=False, show_plots=False,
+                             fignum=1, complex=False, logplot=False, modes_to_plot=None, ylim=None,
+                             return_abspower=False):
         """
-        Calculate the overlap integral between an input field and a set of 
-        fiber modes.
-
+        Calculate the overlap integral between an input field and a set of fiber modes.
         Parameters
         ----------
         input_field
@@ -515,76 +434,54 @@ class lanternfiber:
         overlap_int_vals
             Array of coupling efficiencies for each mode
         """
-
         if input_field is None:
             input_field = self.input_field
-
         overlap_int_vals = []
         overlap_int_vals_complex = []
-
         for modenum in mode_field_numbers:
-            mode_field = self.make_complex_fld(
-                self.allmodefields_rsoftorder[modenum])
-            
+            mode_field = self.make_complex_fld(self.allmodefields_rsoftorder[modenum])
             # cur_overlap_int = np.abs(np.sum(input_field*mode_field))**2 / \
             #               ( np.sum(np.abs(mode_field)**2) * np.sum(np.abs(input_field)**2) )
-
-            overlap_int_complex = np.sum(input_field*mode_field) \
-                                  / np.sqrt( np.sum(np.abs(mode_field)**2) \
-                                            * np.sum(np.abs(input_field)**2) )
-            
+            overlap_int_complex = np.sum(input_field*mode_field) / \
+                                  np.sqrt( np.sum(np.abs(mode_field)**2) * np.sum(np.abs(input_field)**2) )
             cur_overlap_int = np.abs(overlap_int_complex)**2
             overlap_int_vals.append(cur_overlap_int)
             overlap_int_vals_complex.append(overlap_int_complex)
-
             if verbose:
-                print('Injection efficiency for mode %d: %f' 
-                      % (modenum, cur_overlap_int))
+                print('Injection efficiency for mode %d: %f' % (modenum, cur_overlap_int))
 
         overlap_int_vals = np.array(overlap_int_vals)
         overlap_int_vals_complex = np.array(overlap_int_vals_complex)
         overlap_int = np.sum(overlap_int_vals)
-
         if verbose:
-            print('Total power in input field: %f' 
-                  % np.sum(np.abs(input_field)**2))
-            print('Injection efficiency: %f' 
-                  % overlap_int)
-            print('Coupled power: %f' 
-                  % (overlap_int*np.sum(np.abs(input_field)**2)))
+            print('Total power in input field: %f' % np.sum(np.abs(input_field)**2))
+            print('Injection efficiency: %f' % overlap_int)
+            print('Coupled power: %f' % (overlap_int*np.sum(np.abs(input_field)**2)))
 
         if return_abspower:
             inpow = np.sum(np.abs(input_field)**2)
             overlap_int = overlap_int * inpow
             overlap_int_vals = overlap_int_vals * inpow
-            overlap_int_vals_complex = overlap_int_vals_complex \
-                * np.sqrt(inpow)
+            overlap_int_vals_complex = overlap_int_vals_complex * np.sqrt(inpow)
 
         if show_plots:
             plt.figure(fignum)
             plt.clf()
             # plt.plot(mode_field_numbers, overlap_int_vals, '-o')
-
             if logplot:
                 overlap_int_vals_plot = np.log10(overlap_int_vals)
             else:
                 overlap_int_vals_plot = overlap_int_vals
-
             if modes_to_plot is None:
-                plt.bar(mode_field_numbers, 
-                        overlap_int_vals_plot, 
-                        tick_label=mode_field_numbers)
-                
-                plt.xticks(np.arange(0, self.nmodes, 1), 
-                           rotation=90, 
-                           fontsize=8)
-                plt.gca().set_xticklabels(self.modelabels)
-
+                plt.bar(mode_field_numbers, overlap_int_vals_plot, tick_label=mode_field_numbers)
+                plt.xticks(np.arange(0, self.nmodes, 1), rotation=90, fontsize=8)
+                try:
+                    plt.gca().set_xticklabels(self.modelabels)
+                except ValueError:
+                    print('Warning - could not make mode labels')
             else:
-                plt.bar(mode_field_numbers[modes_to_plot], 
-                        overlap_int_vals_plot[modes_to_plot],
-                        tick_label=mode_field_numbers[modes_to_plot])
-                
+                plt.bar(mode_field_numbers[modes_to_plot], overlap_int_vals_plot[modes_to_plot],
+                    tick_label=mode_field_numbers[modes_to_plot])
             plt.xlabel('Mode number')
             plt.ylabel('Coupling efficiency')
             # plt.title('Total coupling efficiency: %f' % overlap_int)
@@ -598,12 +495,9 @@ class lanternfiber:
             return overlap_int, overlap_int_vals
 
 
-    ##########################################################################
     def make_complex_fld(self, raw_ampl):
         """
-        Convert a raw amplitude (where values <0 mean pi phase) to a 
-        complex field
-
+        Convert a raw amplitude (where values <0 mean pi phase) to a complex field
         Parameters
         ----------
         raw_ampl
@@ -613,38 +507,31 @@ class lanternfiber:
         complex_psf
             The input amplitude rendered as a complex field
         """
-
         fld_ampl = np.abs(raw_ampl)
         fld_phase = np.zeros_like(raw_ampl)
-        # fld_phase[raw_ampl < 0] = np.pi
-        fld_phase = fld_phase.at[raw_ampl < 0].set(np.pi)
+        fld_phase[raw_ampl < 0] = np.pi
         complex_psf = fld_ampl * np.exp(1j * fld_phase)
-
         return complex_psf
 
-    ##########################################################################
+
     def cx2ap(self, input):
         ampl = np.abs(input)
         phase = np.angle(input)/np.pi*180
-
         return ampl, phase
 
-    ##########################################################################
-    def saveToRSoft(self, complex_psf, outfile="PSFOut", 
-                    size_data=100, normtomax=False):
+
+    def saveToRSoft(self, complex_psf, outfile="PSFOut", size_data=100, normtomax=False):
         """
         From Theo's FITS2rsoft script.
-        - The parameter 'size_data' is the physical half-size of the array in 
-        um so make sure you have the dimensions correct.
+        - The parameter 'size_data' is the physical half-size of the array in um so make
+        sure you have the dimensions correct.
 
         - The format of the .fld file is 2 columns for each single column in the
-        fits files, the real then the imaginary. There is a header at the top 
-        of the file which shouldn't need changing, it is just how the data is 
-        interpreted by the program
+        fits files, the real then the imaginary. There is a header at the top of the
+        file which shouldn't need changing, it is just how the data is interpreted
+        by the program
         """
-
-        # Rsoft seems to use different orientation
-        complex_psf = np.transpose(complex_psf)
+        complex_psf = np.transpose(complex_psf) # Rsoft seems to use different orientation
 
         psf_real = complex_psf.real
         psf_imag = complex_psf.imag
@@ -654,8 +541,7 @@ class lanternfiber:
         # Empty array to take all data 3d
         whole_psf = np.zeros([len_data, 2 * len_data])
 
-        # RSoft takes data in columns of real and imaginary parts. 
-        # (make odd ones imag, even real)
+        # RSoft takes data in columns of real and imaginary parts. (make odd ones imag, even real)
         whole_psf[:, ::2] = psf_real
         whole_psf[:, 1::2] = psf_imag
         if normtomax:
@@ -667,20 +553,15 @@ class lanternfiber:
         header = (
             "/rn,a,b/nx0\n/rn,qa,qb\n{0} -{1} {1} 0 OUTPUT_REAL_IMAG_3D\n{0} -{1} {1}"
         ).format(len_data, size_data)
-        np.savetxt(outfile + ".fld", whole_psf, fmt="%.18E", 
-                   header=header, comments="")
+        np.savetxt(outfile + ".fld", whole_psf, fmt="%.18E", header=header, comments="")
 
 
-    ##########################################################################
     def save_multiple_rsoft(self, modecoeffs, outpath='./', size_data=100,
-                            makeBatFile=False, indFile="bptmp.ind", 
-                            outPrefix="BPScan", numBatfiles=1, 
-                            savemetadata=True, show_plots=True, 
-                            beamprop_prefix='bp_', make_hyperbat=False):
+                            makeBatFile=False, indFile="bptmp.ind", outPrefix="BPScan",
+                            numBatfiles=1, savemetadata=True, show_plots=True, beamprop_prefix='bp_',
+                            make_hyperbat=False):
         """
-        Save multiple rosft launch fields for a range of modes, and .bat file 
-        to run them
-        
+        Save multiple rosft launch fields for a range of modes, and .bat file to run them
         Parameters
         ----------
         modecoeffs
@@ -697,23 +578,18 @@ class lanternfiber:
 
         imsz = np.shape(self.allmodefields_rsoftorder[0])[0]
         filecount = 0
-
         for cur_coeffs in modecoeffs:
             print(' ')
             print("Saving .fld file using coeffs:")
             print(cur_coeffs)
             cur_modefield = np.zeros((imsz,imsz), dtype='complex')
-
             for k in range(self.nmodes):
                 cur_modefield = cur_modefield + cur_coeffs[k] * \
                     self.make_complex_fld(self.allmodefields_rsoftorder[k])
-                
             self.input_field = cur_modefield
             outfilename = outPrefix + '_%.2d' % filecount
-            self.saveToRSoft(cur_modefield, outfile=outpath+outfilename, 
-                             size_data=size_data)
+            self.saveToRSoft(cur_modefield, outfile=outpath+outfilename, size_data=size_data)
             allOutfiles.append(outfilename)
-
             if show_plots:
                 plt.figure(1)
                 plt.subplot(121)
@@ -724,11 +600,8 @@ class lanternfiber:
 
             if savemetadata:
                 metadata_filename = outfilename + '_metadata.npz'
-                np.savez(outpath+metadata_filename, 
-                         outfilename=outfilename, 
-                         cur_modefield=cur_modefield,
+                np.savez(outpath+metadata_filename, outfilename=outfilename, cur_modefield=cur_modefield,
                          cur_coeffs=cur_coeffs, size_data=size_data)
-                
             filecount = filecount + 1
 
         if makeBatFile:
@@ -741,13 +614,11 @@ class lanternfiber:
             batfileStarts = np.zeros(numBatfiles)
             batfileEnds = np.zeros(numBatfiles)
             fnum = 0
-
             for k in range(nf):
                 batfileLengths[fnum] = batfileLengths[fnum] + 1
                 fnum = fnum + 1
                 if fnum == numBatfiles:
                     fnum = 0
-
             for k in range(numBatfiles):
                 if k == 0:
                     batfileStarts[k] = 0
@@ -764,64 +635,51 @@ class lanternfiber:
                 # endInd = int((k + 1) * batfileLength)
                 startInd = int(batfileStarts[k])
                 endInd = int(batfileEnds[k])
-
                 if k == (numBatfiles - 1):
                     curOutfiles = allOutfiles[startInd:]
                 else:
                     curOutfiles = allOutfiles[startInd:endInd]
-
-                print("Making .bat file: " + outpath + outPrefix + "_" 
-                      + str(k) + ".bat")
-                batfile = open(outpath + outPrefix + "_" + str(k) 
-                               + ".bat", "w")
-                allBatfileNames.append(outPrefix + "_" + str(k) 
-                                       + ".bat")
-
+                print("Making .bat file: " + outpath + outPrefix + "_" + str(k) + ".bat")
+                batfile = open(outpath + outPrefix + "_" + str(k) + ".bat", "w")
+                allBatfileNames.append(outPrefix + "_" + str(k) + ".bat")
                 for launch_file in curOutfiles:
-                    cmdStr = (progname + " " + indFile + " prefix="
-                            + beamprop_prefix + launch_file + " launch_file="
+                    cmdStr = (progname + " " + indFile + " prefix=" + beamprop_prefix + launch_file + " launch_file="
                             + launch_file + "_inputfield" + ".fld wait=0\n")
                     print(cmdStr)
                     batfile.write(cmdStr)
                     self.all_indiv_commands.append(cmdStr)
                     allOutfilenames.append(beamprop_prefix + launch_file)
-
                 batfile.close()
                 self.allBatfileNames.append(allBatfileNames)
-
             if numBatfiles > 1:
-                superbatfile = open(outpath + "runAllBatfiles" 
-                                    + outPrefix + ".bat", "w")
-
+                superbatfile = open(outpath + "runAllBatfiles" + outPrefix + ".bat", "w")
                 for batfilename in allBatfileNames:
                     cmdStr = "start cmd /k call " + batfilename + "\n"
                     superbatfile.write(cmdStr)
-
                 superbatfile.close()
-                self.all_runallbats.append("runAllBatfiles" + outPrefix 
-                                           + ".bat")
+                self.all_runallbats.append("runAllBatfiles" + outPrefix + ".bat")
 
             if make_hyperbat:
-                hyperbatfile = open(outpath + "runAllSuperBatfiles" 
-                                    + '_WL%.3f' %  (self.wavelength*1) 
-                                    + ".bat", "w")
+                hyperbatfile = open(outpath + "runAllSuperBatfiles" + '_WL%.3f' %  (self.wavelength*1) +
+                                    ".bat", "w")
                 for batfilename in self.all_runallbats:
                     cmdStr = "start cmd /k call " + batfilename + "\n"
                     hyperbatfile.write(cmdStr)
                 hyperbatfile.close()
-                self.all_hyperbats.append("runAllSuperBatfiles" 
-                                          + '_WL%.3f' %  (self.wavelength*1)
-                                          + ".bat")
+                self.all_hyperbats.append("runAllSuperBatfiles" + '_WL%.3f' %  (self.wavelength*1) +
+                                          ".bat")
 
 
-    ##########################################################################
-    def load_rsoft_data_sm2mm(self, rsoft_datadir, rsoft_fileprefix, 
-                              show_plots=False, av_fluxes=100, 
-                              offset_sm_meas=100, save_output=False, 
-                              zero_phases=True, fignum=2):
+
+
+
+
+    def load_rsoft_data_sm2mm(self, rsoft_datadir, rsoft_fileprefix, show_plots=False,
+                        av_fluxes=100, offset_sm_meas=100, save_output=False, zero_phases=True,
+                        fignum=2):
         """
-        Load rsoft outputs for a single-mode to multi-mode propagation. 
-        Assumes one SM waveguide excited at a time.
+        Load rsoft outputs for a single-mode to multi-mode propagation. Assumes one SM waveguide
+        excited at a time.
 
         Parameters
         ----------
@@ -831,8 +689,8 @@ class lanternfiber:
         av_fluxes
             If >0, average n flux measurements from monitor
         offset_sm_meas
-            Measure SM fluxes starting at this index. Useful to skip first 
-            part of monitor since still coupling.
+            Measure SM fluxes starting at this index. Useful to skip first part of monitor
+            since still coupling.
         save_output : bool
             Save the measured powers and phases to a npz file
         zero_phases : bool
@@ -847,7 +705,6 @@ class lanternfiber:
         mm_phase_monrange = (38, 57)
 
         nwgs = self.nmodes # TODO - Fix mixing up of nmodes and nwgs in this function
-
         for wgnum in range(nwgs):
             rsoft_filename = rsoft_fileprefix + '%.2d' % (wgnum+1)
             print('Reading rsoft files ' + rsoft_filename)
@@ -857,13 +714,9 @@ class lanternfiber:
                 r.plotall()
                 plt.pause(0.001)
 
-            smpower_mons = r.MONdata[:, 
-                                     sm_power_monrange[0]:sm_power_monrange[1]]
-            mmpower_mons = r.MONdata[:, 
-                                     mm_power_monrange[0]:mm_power_monrange[1]]
-            mmphase_mons = r.MONdata[:, 
-                                     mm_phase_monrange[0]:mm_phase_monrange[1]]
-            
+            smpower_mons = r.MONdata[:, sm_power_monrange[0]:sm_power_monrange[1]]
+            mmpower_mons = r.MONdata[:, mm_power_monrange[0]:mm_power_monrange[1]]
+            mmphase_mons = r.MONdata[:, mm_phase_monrange[0]:mm_phase_monrange[1]]
             if av_fluxes > 0:
                 f = smpower_mons[offset_sm_meas:av_fluxes+offset_sm_meas, :]
                 smpower = f.mean(axis=0)
@@ -887,13 +740,9 @@ class lanternfiber:
             self.all_mmphases.append(mmphase)
 
         if save_output:
-            outfilename = self.datadir + 'extractedvals_' 
-            + rsoft_fileprefix + '.npz'
-            np.savez(outfilename, 
-                     all_smpowers=self.all_smpowers, 
-                     all_mmpowers=self.all_mmpowers,
-                     all_mmphases=self.all_mmphases, 
-                     all_smphases=self.all_smphases)
+            outfilename = self.datadir + 'extractedvals_' + rsoft_fileprefix + '.npz'
+            np.savez(outfilename, all_smpowers=self.all_smpowers, all_mmpowers=self.all_mmpowers,
+                     all_mmphases=self.all_mmphases, all_smphases=self.all_smphases)
 
         if show_plots:
             plt.figure(fignum)
@@ -913,13 +762,11 @@ class lanternfiber:
             plt.tight_layout()
 
 
-    ##########################################################################
-    def load_rsoft_data_mm2sm(self, rsoft_datadir, rsoft_fileprefix, 
-                              show_plots=False, av_fluxes=100, 
-                              save_output=False, fignum=2):
+    def load_rsoft_data_mm2sm(self, rsoft_datadir, rsoft_fileprefix, show_plots=False,
+                              av_fluxes=100, save_output=False, fignum=2):
         """
-        Load rsoft outputs for a multi-mode to single-mode propagation. 
-        Assumes one MM mode excited at a time.
+        Load rsoft outputs for a multi-mode to single-mode propagation. Assumes one MM mode
+        excited at a time.
 
         Parameters
         ----------
@@ -944,7 +791,6 @@ class lanternfiber:
         sm_phase_monrange = (57, 76)
 
         nwgs = self.nmodes # TODO - Fix mixing up of nmodes and nwgs in this function
-
         for wgnum in range(nwgs):
             rsoft_suffix = 'LP%d%d' % (LP_modes[wgnum,0], LP_modes[wgnum,1])
             rsoft_filename = rsoft_fileprefix + rsoft_suffix
@@ -955,14 +801,10 @@ class lanternfiber:
                 r.plotall()
                 plt.pause(0.001)
 
-            smpower_mons = r.MONdata[:, 
-                                     sm_power_monrange[0]:sm_power_monrange[1]]
-            mmpower_mons = r.MONdata[:, 
-                                     mm_power_monrange[0]:mm_power_monrange[1]]
-            mmphase_mons = r.MONdata[:, 
-                                     mm_phase_monrange[0]:mm_phase_monrange[1]]
-            smphase_mons = r.MONdata[:, 
-                                     sm_phase_monrange[0]:sm_phase_monrange[1]]
+            smpower_mons = r.MONdata[:, sm_power_monrange[0]:sm_power_monrange[1]]
+            mmpower_mons = r.MONdata[:, mm_power_monrange[0]:mm_power_monrange[1]]
+            mmphase_mons = r.MONdata[:, mm_phase_monrange[0]:mm_phase_monrange[1]]
+            smphase_mons = r.MONdata[:, sm_phase_monrange[0]:sm_phase_monrange[1]]
 
             if av_fluxes > 0:
                 f = smpower_mons[-av_fluxes:, :]
@@ -985,13 +827,9 @@ class lanternfiber:
             self.all_smphases.append(smphase)
 
         if save_output:
-            outfilename = self.datadir + 'extractedvals_' 
-            + rsoft_fileprefix + '.npz'
-            np.savez(outfilename, 
-                     all_smpowers=self.all_smpowers, 
-                     all_mmpowers=self.all_mmpowers,
-                     all_mmphases=self.all_mmphases, 
-                     all_smphases=self.all_smphases)
+            outfilename = self.datadir + 'extractedvals_' + rsoft_fileprefix + '.npz'
+            np.savez(outfilename, all_smpowers=self.all_smpowers, all_mmpowers=self.all_mmpowers,
+                     all_mmphases=self.all_mmphases, all_smphases=self.all_smphases)
 
         if show_plots:
             plt.figure(fignum)
@@ -1011,12 +849,11 @@ class lanternfiber:
             plt.tight_layout()
 
 
-    ##########################################################################
     def load_rsoft_data_customfld(self, rsoft_datadir, rsoft_fileprefix, indfile, show_plots=False,
                               av_fluxes=100, save_output=False, fignum=2, LP_file_numbering=False,
                               zero_mmphase=True, np_fileprefix=None, ap_rad=30,
                               show_indivmasks=False, use_pathway_mons=False, use_monitor_objects=False,
-                              reorder_monobjs=False, nfiles=None, save_label=''):
+                              reorder_monobjs=False, nfiles=None, save_label='', autogen_incoeffs=False):
         """
         Load rsoft outputs for MM to SM simulations, where the input FLD was generated from this code
         and no monitors are used.
@@ -1054,8 +891,8 @@ class lanternfiber:
             print("Error - can't simultaneously specify both tyes of monitors")
             return
         self.all_FLDampls = []
-        for modenum in range(nfiles):
 
+        for modenum in range(nfiles):
             # Get SM WG output amps and phases from rsoft output files
             if LP_file_numbering:
                 rsoft_suffix = 'LP%d%d' % (LP_modes[modenum,0], LP_modes[modenum,1])
@@ -1109,11 +946,15 @@ class lanternfiber:
                     plt.pause(0.001)
                     # input("Press Enter to continue...")
 
-            # Get input mode powers and phase from npz files
-            npfilename = rsoft_datadir+np_fileprefix+rsoft_suffix
-            npfile = np.load(npfilename+'_metadata.npz')
-            coeffs = npfile['cur_coeffs']
-            coeffs = coeffs[:self.nmodes] # Remove coeffs for modes not being used
+            if autogen_incoeffs:
+                coeffs = np.zeros(self.nmodes)
+                coeffs[modenum] = 1
+            else:
+                # Get input mode powers and phase from npz files
+                npfilename = rsoft_datadir+np_fileprefix+rsoft_suffix
+                npfile = np.load(npfilename+'_metadata.npz')
+                coeffs = npfile['cur_coeffs']
+                coeffs = coeffs[:self.nmodes] # Remove coeffs for modes not being used
 
             mm_power = np.abs(coeffs)
             mm_phase = np.angle(coeffs)/np.pi*180
@@ -1128,7 +969,7 @@ class lanternfiber:
             # outfilename = self.datadir + 'extractedvals_' + rsoft_fileprefix + '.npz'
             if len(save_label) > 0:
                 save_label = save_label + '_'
-            outfilename = self.datadir + 'extractedvals_' + save_label + rsoft_fileprefix[3:-1] + '.npz'
+            outfilename = self.datadir + 'extractedvals_' + save_label + rsoft_fileprefix[:-1] + '.npz'
             np.savez(outfilename, all_smpowers=self.all_smpowers, all_mmpowers=self.all_mmpowers,
                      all_mmphases=self.all_mmphases, all_smphases=self.all_smphases)
 
@@ -1150,7 +991,6 @@ class lanternfiber:
             plt.tight_layout()
 
 
-    ##########################################################################
     def load_savedvalues(self, filename):
         """
         Load previously saved powers and phases from npz file
@@ -1163,14 +1003,14 @@ class lanternfiber:
         self.all_smpowers = f['all_smpowers']
         self.all_mmpowers = f['all_mmpowers']
         self.all_mmphases = f['all_mmphases']
-
         try:
             self.all_smphases = f['all_smphases']
         except:
             self.all_smphases = None
+        self.nmodes = np.shape(self.all_mmpowers)[1] # Todo - check this right way round
+        self.nwgs = np.shape(self.all_smpowers)[1] # Todo - check this right way round
 
 
-    ##########################################################################
     def set_mmvals_nominal(self, square=False):
         """
         Set all appropriate mm powers and phases to 1 and 0 respectively.
@@ -1184,7 +1024,6 @@ class lanternfiber:
             self.all_mmphases = np.zeros(self.nmodes)
 
 
-    ##########################################################################
     def set_smvals_nominal(self, square=False):
         """
         Set all appropriate sm powers and phases to 1 and 0 respectively.
@@ -1198,7 +1037,6 @@ class lanternfiber:
             self.all_smphases = np.zeros(self.nmodes)
 
 
-    ##########################################################################
     def make_transfer_matrix_sm2mm(self, sm_phase=0):
         """
         Calculate the transfer matrix Cmat from SM-to-MM simulations.
@@ -1209,21 +1047,17 @@ class lanternfiber:
         sm_phase
             Phase to set the SM waveguide excitation to
         """
-
         nwgs = len(self.all_smpowers) # TODO - fix mixing-up of nmodes and nwgs here
-        Cmat = np.zeros((nwgs,nwgs), dtype=np.cfloat)
-
+        Cmat = np.zeros((nwgs,nwgs), dtype=np.complex128)
         for col_num in range(nwgs):
             sm_val = self.all_smpowers[col_num][col_num] * np.exp(1j*sm_phase)
-            col = self.all_mmpowers[col_num] \
-                * np.exp(1j*self.all_mmphases[col_num]/180*np.pi) / sm_val
+            col = self.all_mmpowers[col_num] * np.exp(1j*self.all_mmphases[col_num]/180*np.pi) / sm_val
             Cmat[:,col_num] = col
-
         self.Cmat = Cmat
 
 
-    ##########################################################################
-    def make_transfer_matrix_mm2sm(self, mm_phase=None, show_plots=True, truncate=None):
+    def make_transfer_matrix_mm2sm(self, mm_phase=None, show_plots=True, truncate=None,
+                                   save_cmat=False, save_label='', rsoft_fileprefix=None):
         """
         Calculate the transfer matrix Dmat from MM-to-SM simulations.
         This requires that for each measurement, only one mode is excited
@@ -1234,7 +1068,7 @@ class lanternfiber:
             Phase to set MM mode phase to. If None, use phase from data.
         """
         # nwgs = len(self.all_mmpowers)
-        Cmat = np.zeros((self.nwgs,self.nmodes), dtype=np.cfloat)
+        Cmat = np.zeros((self.nwgs,self.nmodes), dtype=np.complex128)
         for col_num in range(self.nmodes):
             if mm_phase is not None:
                 mm_val = self.all_mmpowers[col_num][col_num] * np.exp(1j*mm_phase)
@@ -1253,8 +1087,17 @@ class lanternfiber:
         # Make a matrix mapping to the output intensities
         # real_mat = np.vstack()
 
+        if save_cmat:
+            if rsoft_fileprefix is None:
+                print('Error: must specify rsoft_fileprefix to save Cmat')
+                return
+            if len(save_label) > 0:
+                save_label = save_label + '_'
+            outfilename = self.datadir + 'cmat_' + save_label + rsoft_fileprefix[:-1] + '.npz'
+            print('Saving Cmat to file '+outfilename)
+            np.savez(outfilename, Cmat=self.Cmat)
 
-    ##########################################################################
+
     def plot_matrix(self, matrix=None, fignum=3, cmap='twilight_shifted', figsize=(9,4)):
         if matrix is None:
             matrix = self.Cmat
@@ -1275,7 +1118,6 @@ class lanternfiber:
         # plt.tight_layout()
 
 
-    ##########################################################################
     def matrix_complex2real(self, Cmat):
         # TODO - Do this without a loop (Kronecker product?)
         Rmat = np.zeros((Cmat.shape[0]*2, Cmat.shape[1]*2))
@@ -1288,7 +1130,6 @@ class lanternfiber:
         return Rmat
 
 
-    ##########################################################################
     def matrix_real2complex(self, Rmat):
         # TODO - Do this without a loop (Kronecker product?)
         Cmat = np.zeros((Rmat.shape[0]//2, Rmat.shape[1]//2), dtype='complex')
@@ -1301,7 +1142,6 @@ class lanternfiber:
         return Cmat
 
 
-    ##########################################################################
     def load_rsoft_data_sm2mm_single(self, rsoft_datadir, rsoft_fileprefix, show_plots=False,
                               av_fluxes=100, offset_sm_meas=100, zero_phases=True):
         """
@@ -1365,7 +1205,6 @@ class lanternfiber:
         self.all_mmphases.append(mmphase)
 
 
-    ##########################################################################
     def load_rsoft_data_mm2sm_single(self, rsoft_datadir, rsoft_fileprefix, show_plots=False,
                               av_fluxes=100):
         """
@@ -1433,7 +1272,6 @@ class lanternfiber:
         self.out_field_phase.append(r.FLDphase)
 
 
-    ##########################################################################
     def load_rsoft_data_fldonly(self, rsoft_datadir, rsoft_fileprefix):
         rsoft_filename = rsoft_fileprefix
         print('Reading rsoft files ' + rsoft_filename)
@@ -1447,7 +1285,6 @@ class lanternfiber:
         self.all_smphases = [0]
 
 
-    ##########################################################################
     def show_outfield(self, fignum=1):
         """
         Show teh maps of output amplitude and phase
@@ -1469,7 +1306,6 @@ class lanternfiber:
         plt.tight_layout()
 
 
-    ##########################################################################
     def test_matrix(self, matrix, input_powers, input_phases, output_powers, output_phases, fignum=1, pausetime=1,
                     num_to_show=None, unnormalise_smpower=True, unwrap_phase=True):
         """
@@ -1585,7 +1421,6 @@ class lanternfiber:
     #     plt.pause(pausetime)
 
 
-    ##########################################################################
     def read_ind_file(self, rsoft_datadir, ind_filename, skipfirst=True, getWGposns=False):
         """
         Read useful info from an rsoft .ind file, such as the power and phase of launch
@@ -1671,7 +1506,6 @@ class lanternfiber:
         return all_powers, all_phases
 
 
-    ##########################################################################
     def measure_wg_fields(self, ap_rad = 30, show_plots=True, show_indivmasks=False, fignum=1, field_index=0):
         ampl_im = self.out_field_ampl[field_index]
         phase_im = self.out_field_phase[field_index]
@@ -1709,13 +1543,11 @@ class lanternfiber:
         self.all_smphases.append(phases)
 
 
-    ##########################################################################
     def normalise_smpowers(self):
         for k in range(len(self.all_smpowers)):
             self.all_smpowers[k] = self.all_smpowers[k] / np.sqrt(np.sum(np.array(self.all_smpowers[k])**2))
 
 
-    ##########################################################################
     def make_rsoft_launch_fields(self, set_type, num_outs=1, npix=200, max_r=2, indfile=None, show_plots=False,
                                  make_bat_file=False, num_bat_files=1, outpath=None, outprefix=None,
                                  make_hyperbat=False):
@@ -1755,7 +1587,7 @@ class lanternfiber:
             self.find_fiber_modes()
             self.make_fiber_modes(show_plots=show_plots, npix=npix)
 
-        if set_type is 'probe':
+        if set_type == 'probe':
             modecoeffs = []
             for k in range(self.nmodes):
                 coeff = np.zeros(self.nmodes)
@@ -1765,7 +1597,7 @@ class lanternfiber:
                                   indFile=indfile, makeBatFile=make_bat_file, numBatfiles=num_bat_files,
                                     make_hyperbat=make_hyperbat)
 
-        elif set_type is 'randampphase':
+        elif set_type == 'randampphase':
             loval = 0
             hival = 1
             loval_phase = 0
@@ -1781,7 +1613,6 @@ class lanternfiber:
                                      make_hyperbat=make_hyperbat)
 
 
-    ##########################################################################
     def make_monmodes(self, indfile, data_dir='./', prefix=None, all_wls=None):
         if all_wls is None:
             all_wls = self.all_wls
@@ -1812,12 +1643,11 @@ class lanternfiber:
         self.all_hyperbats.append(prefix + "_RunMultiWlFemsim.bat")
 
 
-    ##########################################################################
     def unpack_cvec(self,input_vec, amp_phase=False):
         n_out = len(input_vec)*2
         out_vec = np.zeros(n_out)
         for k in range(n_out):
-            inmode_num = np.int(k/2)
+            inmode_num = int(k/2)
             if k%2 == 0:
                 if amp_phase:
                     out_vec[k] = np.abs(input_vec[inmode_num])
@@ -1831,7 +1661,6 @@ class lanternfiber:
         return out_vec
 
 
-    ##########################################################################
     def make_sim_data(self, ndata=1, in_amp_phase = None, amp_range=[0,1], phase_range=[0, 2*np.pi],
                       limit_modes=None):
         input_modecoeffs = []
@@ -1860,9 +1689,9 @@ class lanternfiber:
         return input_modecoeffs, output_smvals
 
 
-    ##########################################################################
     def generate_sim_I_data(self, ndata=1, in_amp_phase = None, amp_range=[0,1], phase_range=[0, 2*np.pi],
-                            outfilename=None, return_output=False, amp_phase=False, limit_modes=None):
+                            outfilename=None, return_output=False, amp_phase=False, limit_modes=None, overwrite=False):
+
         simdata_inputs, simdata_outputs = self.make_sim_data(ndata, amp_range=amp_range,
                                                  limit_modes=limit_modes, phase_range=phase_range)
 
@@ -1883,14 +1712,96 @@ class lanternfiber:
         simdata_outputI_arr = np.array(simdata_outputI)
 
         if outfilename is not None:
-            np.savez(self.datadir+outfilename, simdata_input_arr=simdata_input_arr,
-                     simdata_outputI_arr=simdata_outputI_arr)
-            print('Saved %d simulated data examples to file ' % ndata + outfilename)
+            filepath = self.datadir+outfilename
+            if not overwrite and os.path.exists(filepath):
+                print('---- WARNING - File %s already exists. Skipping save (overwrite=False). ----' % filepath)
+            else:
+                np.savez(filepath, simdata_input_arr=simdata_input_arr,
+                         simdata_outputI_arr=simdata_outputI_arr, Cmat=self.Cmat, amp_range=amp_range,
+                         phase_range=phase_range, limit_modes=limit_modes)
+                print('Saved %d simulated data examples to file ' % ndata + outfilename)
 
         if return_output:
             return simdata_input_arr, simdata_outputI_arr
 
         return
+
+
+
+    def make_rand_cmat_square(self, nmodes, rank=None, return_matrix=False, show_plots=False, verbose=True):
+        # For square matrices, with rank <= m
+        """
+        Generate an nmodes x nmodes complex matrix.
+        - If rank is None or rank == nmodes: Haar unitary (full rank).
+        - If 0 < rank < nmodes: partial isometry with rank 'rank'
+          (nonzero singular values all 1; remaining singular values 0).
+        """
+        from scipy.stats import unitary_group
+        if rank is None:
+            rank = nmodes
+
+        if rank == nmodes:
+            # Full unitary (Haar)
+            A = unitary_group.rvs(nmodes)
+        else:
+            # Rank-deficient partial isometry: A = U[:, :r] @ V[:, :r]^H
+            U = unitary_group.rvs(nmodes)
+            V = unitary_group.rvs(nmodes)
+            A = U[:, :rank] @ V[:, :rank].conj().T
+
+        self.Cmat = A
+
+        if verbose:
+            print('Making random square matrix ([partial] isometry) with %d modes, and rank %d' % (nmodes, rank))
+            print('Matrix rank: %d' % (np.linalg.matrix_rank(A)))
+        if show_plots:
+            self.plot_matrix()
+
+        if return_matrix:
+            return A
+
+
+
+    def make_rand_cmat_rect(self, input_dims, output_dims, rank=None, return_matrix=False, show_plots=False, verbose=True):
+        # For rectangular m>n and rank < n (partial isometry) matrices
+        """
+        Generate an m x n complex partial isometry matrix:
+            A = U[:, :r] @ V[:, :r].conj().T
+
+        where:
+            - U ∈ U(m) and V ∈ U(n) are Haar-distributed unitary matrices
+            - r = specified rank (or full rank if None)
+            - If r == n <= m → column-orthonormal (isometry), A^H A = I_n
+            - If r == m <= n → row-orthonormal (coisometry), A A^H = I_m
+            - If r < min(m, n) → partial isometry (rank-r projector behaviour)
+        """
+        from scipy.stats import unitary_group
+        if rank is None:
+            rank = min(input_dims, output_dims)
+
+        if not (0 < rank <= min(output_dims, input_dims)):
+            raise ValueError("r must satisfy 0 < r <= min(m, n)")
+
+        U = unitary_group.rvs(output_dims)  # Haar on U(m)
+        V = unitary_group.rvs(input_dims)  # Haar on U(n)
+        U_r = U[:, :rank]                     # (m x r), orthonormal cols
+        V_r = V[:, :rank]                     # (n x r), orthonormal cols
+        A = U_r @ V_r.conj().T  # (m x n), rank r
+
+        self.Cmat = A
+
+        if verbose:
+            print('Making random m>n matrix (partial-isometry) with %d input modes and %d output fibres, '
+                  'and rank %d' % (input_dims, output_dims, rank))
+            print('Matrix rank: %d' % (np.linalg.matrix_rank(A)))
+        if show_plots:
+            self.plot_matrix()
+
+        if return_matrix:
+            return A
+
+
+
 
 
     # def make_sim_data_inverse(self, ndata=1, amp_range=[0,1], phase_range=[0, 2*np.pi],  use_transpose=False):
@@ -1915,37 +1826,3 @@ class lanternfiber:
     #             print('Making sample %d' % k)
     #
     #     return input_smvals, output_modecoeffs
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

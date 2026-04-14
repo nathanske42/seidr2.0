@@ -33,9 +33,9 @@ seidr
 │       │   star_planet.py
 │
 │
-└───test
-│   │   test_kernel_nulling.py
-│   │   test_star_planet.py
+└───example
+│   │   example_kernel_nulling.py
+│   │   example_star_planet.py
 │
 │
 ```
