@@ -7,11 +7,12 @@ import jax.random as jr
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
-import lanternfiber
 import dLux as dl
 import dLux.utils as dlu
 
 import copy
+
+from seidr.lanternfiber import lanternfiber
 
 #%%
 class SeidrSim:
@@ -61,7 +62,7 @@ class SeidrSim:
 
         self.n_zernikes = n_zernikes
 
-        self.lf = lanternfiber.lanternfiber(
+        self.lf = lanternfiber(
             n_core=n_core,
             n_cladding=n_cladding,
             core_radius=core_diameter / 2,
@@ -100,7 +101,7 @@ class SeidrSim:
                                               normalise=True))
         ]
 
-        # # Construct Optics
+        ## Construct Optics
         self.optics = dl.CartesianOpticalSystem(
             wf_npixels, diameter, layers, 
             focal_length, psf_npixels, psf_pixel_scale

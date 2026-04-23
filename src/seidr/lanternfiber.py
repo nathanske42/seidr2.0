@@ -1,18 +1,122 @@
 """
 A class to do useful fiber and photonic lantern things, such as mode finding, coupling, etc.
-
-This class uses
-ofiber https://ofiber.readthedocs.io
-polarTransform https://polartransform.readthedocs.io/en/latest/getting-started.html
 """
 import numpy as np
-import ofiber
 import matplotlib.pyplot as plt
-import polarTransform
-from viewRSoftData import *
-from scipy import ndimage
+# from viewRSoftData import *
+from scipy import ndimage, special, optimize
 from pathlib import Path
 import os
+
+
+# ---------------------------------------------------------------------------
+# LP mode functions for step-index circular fiber
+# Ported from the ofiber library (https://ofiber.readthedocs.io),
+# originally based on Ghatak "Introduction to Fiber Optics", eqn 8.40/8.58.
+# ---------------------------------------------------------------------------
+
+def _lp_mode_eqn(b, V, ell):
+    """Eigenvalue equation for guided LP modes (Ghatak eqn 8.40). Returns zero at a guided mode."""
+    U = V * np.sqrt(1 - b)
+    W = V * np.sqrt(b)
+    lhs = U * special.jv(ell - 1, U) / special.jv(ell, U)
+    rhs = -W * special.kn(ell - 1, W) / special.kn(ell, W)
+    return lhs - rhs
+
+
+def _lp_mode_value(V, ell, em):
+    """
+    Normalised propagation constant b for LP mode (ell, em) in a step-index fiber.
+    Returns None if the mode does not exist.
+    """
+    if ell < 0:
+        ell = -ell
+    if em <= 0 or V <= 0:
+        return None
+
+    abit = 1e-5
+    jnz = special.jn_zeros(ell, em)
+    lo = max(0, 1 - (jnz[em - 1] / V) ** 2) + abit
+    hi = (1 - abit) if em == 1 else (1 - (jnz[em - 2] / V) ** 2 - abit)
+
+    if hi < lo:
+        return None
+    try:
+        return optimize.brentq(_lp_mode_eqn, lo, hi, args=(V, ell))
+    except ValueError:
+        return None
+
+
+def _lp_mode_values(V, ell):
+    """Return all normalised propagation constants b for azimuthal order ell."""
+    all_b = []
+    for em in range(1, 10):
+        b = _lp_mode_value(V, ell, em)
+        if b is None:
+            break
+        all_b.append(b)
+    return np.array(all_b)
+
+
+def _lp_total_irradiance(V, b, ell):
+    """Total irradiance (core + cladding) normalised to core area (Ghatak eqn 8.58)."""
+    U = V * np.sqrt(1 - b)
+    W = V * np.sqrt(b)
+    return V ** 2 / U ** 2 * special.kn(ell + 1, W) * special.kn(ell - 1, W) / special.kn(ell, W) ** 2
+
+
+def _lp_radial_field(V, b, ell, r_over_a):
+    """Normalised radial field amplitude for a step-index fiber LP mode."""
+    U = V * np.sqrt(1 - b)
+    W = V * np.sqrt(b)
+    r = np.abs(r_over_a)
+    A = special.jv(ell, U * r) / special.jv(ell, U)
+    B = special.kn(ell, W * r) / special.kn(ell, W)
+    values = np.where(r < 1, A, B)
+    return values / np.sqrt(_lp_total_irradiance(V, b, ell))
+
+
+# ---------------------------------------------------------------------------
+# Polar-to-Cartesian image conversion
+# Ported from the polarTransform library (https://polartransform.readthedocs.io).
+# Reproduces convertToCartesianImage() with all-default parameters for a
+# square (n_theta, n_r) input image.
+# ---------------------------------------------------------------------------
+
+def _polar_to_cartesian(polar_image):
+    """Convert a (n_theta, n_r) polar image to a (2*n_r, 2*n_r) Cartesian image.
+
+    Reproduces polarTransform.convertToCartesianImage with default parameters:
+      center='middle-middle', initialRadius=0, finalRadius=n_r,
+      initialAngle=0, finalAngle=2*pi, order=3, border='constant'.
+    """
+    n_theta, n_r = polar_image.shape
+    out_size = 2 * n_r
+    center_x = center_y = n_r  # 'middle-middle' default
+
+    xs = np.arange(out_size)
+    ys = np.arange(out_size)
+    x, y = np.meshgrid(xs, ys)
+
+    cX = x - center_x
+    cY = y - center_y
+    r = np.sqrt(cX ** 2 + cY ** 2)
+    theta = np.arctan2(cY, cX)
+    theta = np.where(theta < 0, theta + 2 * np.pi, theta)
+
+    # scaleRadius = n_r / (n_r - 0) = 1; scaleAngle = n_theta / (2*pi)
+    r_idx = r
+    theta_idx = theta * (n_theta / (2 * np.pi))
+
+    desiredCoords = np.vstack((theta_idx.flatten(), r_idx.flatten()))
+
+    # border='constant': pad by 3 with 'edge', then offset coords by 3
+    padded = np.pad(polar_image, ((3, 3), (3, 3)), 'edge')
+    desiredCoords = desiredCoords + 3
+
+    return ndimage.map_coordinates(padded, desiredCoords, mode='constant',
+                                   cval=0.0, order=3).reshape(out_size, out_size)
+
 
 class lanternfiber:
     def __init__(self, n_core=None, n_cladding=None, core_radius=None, wavelength=None, nmodes=1, nwgs=1,
@@ -85,7 +189,6 @@ class lanternfiber:
         # Make text mode labels
         modelabels = []
         for k in range(self.nmodes):
-            print(k)
             if k < 3:  # Assumes first 3 modes are LP0x modes
                 label = 'LP%d%d' % (self.LP_modes[k, 0], self.LP_modes[k, 1])
             else:
@@ -123,7 +226,7 @@ class lanternfiber:
         allmodes_l = []
         allmodes_m = []
         for l in range(max_l):
-            cur_b = ofiber.LP_mode_values(self.V, l)
+            cur_b = _lp_mode_values(self.V, l)
             if len(cur_b) == 0:
                 break
             else:
@@ -161,7 +264,7 @@ class lanternfiber:
 
 
     def make_fiber_modes(self, max_r=2, npix=100, zlim=0.04, show_plots=False,
-                         normtosum=True, rotate_mode_angle=None):
+                         normtosum=True, rotate_mode_angle=None, plot_pausetime=0.5):
         """
         Calculate the LP mode fields, and store as polar and cartesian amplitude maps
 
@@ -192,8 +295,8 @@ class lanternfiber:
         self.microns_per_pixel = array_size_microns / (npix*2)
 
         for mode_to_calc in range(self.nLPmodes):
-            field_1d = ofiber.LP_radial_field(self.V, self.allmodes_b[mode_to_calc],
-                                              self.allmodes_l[mode_to_calc], r)
+            field_1d = _lp_radial_field(self.V, self.allmodes_b[mode_to_calc],
+                                        self.allmodes_l[mode_to_calc], r)
             #TODO - LP02 comes out with core being pi phase and ring being 0 phase... investigate this.
 
             phivals = np.linspace(0, 2*np.pi, npix)
@@ -212,8 +315,8 @@ class lanternfiber:
             field_cos = np.nan_to_num(field_cos)
             field_sin = np.nan_to_num(field_sin)
 
-            field_cos_cart, d = polarTransform.convertToCartesianImage(field_cos.T)
-            field_sin_cart, d = polarTransform.convertToCartesianImage(field_sin.T)
+            field_cos_cart = _polar_to_cartesian(field_cos.T)
+            field_sin_cart = _polar_to_cartesian(field_sin.T)
 
             if rotate_mode_angle is not None:
                 print('Warning: rotating mode fields by %f degrees. ONLY APPLIES TO CARTESIAN FIELDS!' %
@@ -237,7 +340,7 @@ class lanternfiber:
 
             if show_plots:
                 self.plot_fiber_modes(mode_to_calc, zlim)
-                plt.pause(0.5)
+                plt.pause(plot_pausetime)
 
 
     def plot_fiber_modes(self, mode_to_plot, zlim=0.04, fignum=1):

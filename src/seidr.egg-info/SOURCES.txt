@@ -1,11 +1,11 @@
+README.md
 pyproject.toml
 src/seidr/SeidrSim.py
 src/seidr/__init__.py
 src/seidr/lanternfiber.py
+src/seidr/seidr_functions_misc.py
 src/seidr/star_planet.py
 src/seidr.egg-info/PKG-INFO
 src/seidr.egg-info/SOURCES.txt
 src/seidr.egg-info/dependency_links.txt
 src/seidr.egg-info/top_level.txt
-test/test_kernel_nulling.py
-test/test_star_planet.py

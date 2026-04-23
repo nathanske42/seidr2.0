@@ -5,9 +5,11 @@ Defines Functions for Use in End-to-End Seidr Simulations
 
 #%% Import Libraries and Modules
 
+import h5py
 import jax
 import jax.numpy as np
 from jax import random
+import h5py
 
 import dLux.utils as dlu
 import matplotlib.pyplot as plt
@@ -45,3 +47,24 @@ def correlated_noise(correlation_time, rms_amplitudes, sample_times,
         )
 
     return noise
+
+##############################################################################
+def load_lb_transfer_matrix(f_path, f_pl_name, 
+                            wl, r_ms, ds, 
+                            dz, rv, xywidth, 
+                            z_len, tr):
+    """
+        Used to load complex transfer matrices for the lantern fiber,
+        as calculated using lightbea.
+    """
+
+    f_name = f_path + f_pl_name + '_C_lm_array__wl=' + str(wl) \
+        + '_rms=' + str(r_ms) + '_ds=' + str(ds) + '_dz=' + str(dz) \
+        + '_rv=' + str(rv) + '_xyw=' + str(xywidth) + '_zlen=' + str(z_len) \
+        + '_tr=' + str(tr) + '.h5'
+
+    C_lm_data = h5py.File(f_name, 'r')
+    C_lm_array = C_lm_data['C_lm'][:]
+    C_lm_data.close()
+
+    return C_lm_array
