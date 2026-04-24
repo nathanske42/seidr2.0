@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import jax.random as jr
 import matplotlib.pyplot as plt
 
-from seidr.zernike_to_lp import generate_lp_with_zernikes
+from seidr.zernike_to_lp import generate_lp_from_zernikes
 
 
 #%%########################################################################
@@ -20,8 +20,9 @@ psf_npixels = 96  # number of pixels across the PSF plane for SeidrSim optics
 
 n_zernikes = 30  # number of Zernike modes to include in the random aberrations
 
-f_number = 5.5  # f-number of the optics
-
+focal_length = 20000 # focal length of the optics in um
+pupil_diameter = 4500 #256*17  # diameter of the pupil in um
+f_number = focal_length / pupil_diameter  # f-number of the optics
 
 ## HMSPL parameters ##
 
@@ -34,23 +35,29 @@ r_clad_out = 62.5 # [um]
 r_core_mm = r_clad_out/taper_ratio # cladding radius [um]
 d_core_mm = 2 * r_core_mm  # MMF end core diameter [um]
 
-max_r = r_core_mm + 5 # [um]
+# numerical window / padding scaling factor
+max_r = 3 # [um]
 
 ## Refractive Indices ##
 n_core_mm = 1.44
 n_clad_mm = 1.4345
 
+## Wavefront error RMS
+tiptilt_rms = 1e-6 # m
+ho_rms = 5e-7 # m
 
-
+save_data = False # whether to save the generated dataset to disk
 
 
 #%%
 if __name__ == "__main__":
     
-    sim, results = generate_lp_with_zernikes(
+    sim, results = generate_lp_from_zernikes(
         n_sims=n_sims,
         seed=1,
         wavel=wavel,
+        f_number=f_number,
+        pupil_diameter=pupil_diameter,
         n_core=n_core_mm,
         n_cladding=n_clad_mm,
         core_diameter=d_core_mm,
@@ -58,15 +65,13 @@ if __name__ == "__main__":
         wf_npixels=wf_npixels,
         psf_npixels=psf_npixels,
         n_zernikes=n_zernikes,
-        f_number=f_number,
-        tiptilt_rms=50e-9,
-        ho_rms=20e-9,
-        return_fields=True,
-        save_data=False,
+        tiptilt_rms =tiptilt_rms,
+        ho_rms = ho_rms,
+        return_fields=True
     )
 
-    print("powers shape :", results["powers"].shape)
-    print("coeffs shape :", results["coeffs"].shape)
+    print("powers shape :", results["lp_powers"].shape)
+    print("coeffs shape :", results["lp_coeffs"].shape)
     print("fields shape :", results["fields"].shape)
     print("number of LP modes :", results["nmodes"])
 
@@ -87,14 +92,14 @@ if __name__ == "__main__":
     plt.colorbar()
 
     plt.subplot(1, 3, 3)
-    plt.bar(np.arange(results["nmodes"]), results["powers"][idx])
+    plt.bar(np.arange(results["nmodes"]), results["lp_powers"][idx])
     plt.xticks(np.arange(results["nmodes"]), results["modelabels"], rotation=90)
     plt.title("LP modal powers")
     plt.tight_layout()
     plt.show()
 
     # Save dataset
-    if save_data == True:
+    if save_data:
         np.savez(
             "seidr_option1_lp_dataset.npz",
             total_coupling=results["total_coupling"],

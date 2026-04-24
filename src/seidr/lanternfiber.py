@@ -259,6 +259,18 @@ class lanternfiber:
 
         # ADDED - HACK?
         self.nmodes = total_unique_modes
+
+        # Rebuild modelabels now that nmodes is known
+        modelabels = []
+        for lval, mval in lp_mode_list:
+            if lval == 0:
+                modelabels.append('LP0%d' % mval)
+            elif lval > 0:
+                modelabels.append('LP%d%da' % (lval, mval))
+            else:
+                modelabels.append('LP%d%db' % (-lval, mval))
+        self.modelabels = modelabels
+
         if return_n_unique:
             return total_unique_modes
 

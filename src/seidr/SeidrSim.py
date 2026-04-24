@@ -22,11 +22,12 @@ class SeidrSim:
         n_core,
         n_cladding,
         core_diameter,
-        max_r=6,
+        max_r=3,
         wf_npixels=512,
         psf_npixels=512,
         n_zernikes=100,
         f_number=4.5,
+        pupil_diameter=1.8,
     ) -> None:
         """
         A simulation of the SEIDR instrument
@@ -59,8 +60,13 @@ class SeidrSim:
         self.n_cladding = n_cladding
         self.core_diameter = core_diameter
         self.max_r = max_r
+        self.pupil_diameter = pupil_diameter
 
         self.n_zernikes = n_zernikes
+
+        self.wf_npixels = wf_npixels
+        self.psf_npixels = psf_npixels
+        self.f_number = f_number
 
         self.lf = lanternfiber(
             n_core=n_core,
@@ -69,32 +75,30 @@ class SeidrSim:
             wavelength=wavel,
         )
         self.lf.find_fiber_modes()
-        self.lf.make_fiber_modes(npix=psf_npixels // 2, 
+        self.lf.make_fiber_modes(npix=self.psf_npixels // 2, 
                                  show_plots=False, max_r=max_r)
 
-        self._optics = self._make_optics(wf_npixels, psf_npixels, 
-                                         f_number, n_zernikes)
+        self._optics = self._make_optics()
 
 
     ##########################################################################
-    def _make_optics(self, wf_npixels, psf_npixels, 
-                     f_number, n_zernikes):
-        # Wavefront properties
-        diameter = 1.8
-        wf_npixels = 512
+    def _make_optics(self):
+        # # Wavefront properties
+        # diameter = self.pupil_diameter  # [m]
+        # wf_npixels = 512
 
         # psf params
-        focal_length = f_number * diameter
-        psf_pixel_scale = self.max_r * self.core_diameter / psf_npixels
+        focal_length = self.f_number * self.pupil_diameter
+        psf_pixel_scale = self.max_r * self.core_diameter / self.psf_npixels
 
-        coords = dlu.pixel_coords(wf_npixels, diameter)
-        circle = dlu.circle(coords, diameter / 2)
+        coords = dlu.pixel_coords(self.wf_npixels, self.pupil_diameter)
+        circle = dlu.circle(coords, self.pupil_diameter / 2)
 
         # Zernike aberrations
-        zernike_indexes = np.arange(1, n_zernikes + 1)
+        zernike_indexes = np.arange(1, self.n_zernikes + 1)
         coeffs = np.zeros(zernike_indexes.shape)
-        coords = dlu.pixel_coords(wf_npixels, diameter)
-        basis = dlu.zernike_basis(zernike_indexes, coords, diameter)
+        coords = dlu.pixel_coords(self.wf_npixels, self.pupil_diameter)
+        basis = dlu.zernike_basis(zernike_indexes, coords, self.pupil_diameter)
 
         layers = [
             ("aperture", dl.layers.BasisOptic(basis, circle, coeffs, 
@@ -103,8 +107,8 @@ class SeidrSim:
 
         ## Construct Optics
         self.optics = dl.CartesianOpticalSystem(
-            wf_npixels, diameter, layers, 
-            focal_length, psf_npixels, psf_pixel_scale
+            self.wf_npixels, self.pupil_diameter, layers, 
+            focal_length, self.psf_npixels, psf_pixel_scale
         )
 
         self.source = dl.PointSource(flux=1.0, 
