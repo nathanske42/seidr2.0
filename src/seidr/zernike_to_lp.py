@@ -5,10 +5,13 @@ import matplotlib.pyplot as plt
 
 from seidr.SeidrSim import SeidrSim
 
+from seidr.seidr_functions_misc import make_smoothrand_multi,\
+      zernike_rms_per_mode 
 
-def generate_lp_from_zernikes(
+##########################################################################
+def generate_temporal_lp_from_zernikes(
     n_sims=100,
-    seed=0,
+    # seed=0,
     wavel=1.55,
     f_number=4.5,
     pupil_diameter=1.8,
@@ -19,8 +22,11 @@ def generate_lp_from_zernikes(
     wf_npixels=512,
     psf_npixels=256,
     n_zernikes=30,
-    tiptilt_rms=50e-9,
-    ho_rms=20e-9,
+    # tiptilt_rms=50e-9,
+    # ho_rms=20e-9,
+    max_rms_perterm=0.4,
+    min_rms_perterm=0.05,
+    smooth_amt=7,
     return_fields=True,
 ):
     """
@@ -56,8 +62,8 @@ def generate_lp_from_zernikes(
     # LP modes created internally by sim.lf
     mode_numbers = list(range(len(sim.lf.allmodefields_rsoftorder)))
 
-    ## Set up random-number generator
-    key = jr.PRNGKey(seed)
+    # ## Set up random-number generator
+    # key = jr.PRNGKey(seed)
 
     ## Initialize lists to store results
     all_zernikes = []
@@ -66,28 +72,37 @@ def generate_lp_from_zernikes(
     all_lp_coeffs = []
     all_fields = [] if return_fields else None
 
+    ## Generate Zernike coefficient wavefront error RMS values 
+    # using Gaussian kernel smoothing
+    rms_per_mode = zernike_rms_per_mode(max_rms_perterm, min_rms_perterm, 
+                                         n_zernikes)
+
+    zernike_coef_array = make_smoothrand_multi(n_sims, n_zernikes, 
+                                                finalsds=rms_per_mode, 
+                                                smthamt=smooth_amt)
+
 
     ##########################################################################
     ### Main simulation loop
     for i in range(n_sims):
 
         # split into three random numbers
-        key, key_tiptilt, key_ho = jr.split(key, 3)
+        # key, key_tiptilt, key_ho = jr.split(key, 3)
 
         ### Zernike coefficient vector -> ADD RANDOM WALK FROM BN
         # z[0]      = piston, set to zero
         # z[1:3]    = tip/tilt
         # z[3:]     = higher-order aberrations
-        zernike_coeffs = jnp.concatenate([
-            jnp.zeros((1,)),
-            tiptilt_rms * jr.normal(key_tiptilt, (2,)),
-            ho_rms * jr.normal(key_ho, (n_zernikes - 3,)),
-        ])
+        # zernike_coeffs = jnp.concatenate([
+        #     jnp.zeros((1,)),
+        #     tiptilt_rms * jr.normal(key_tiptilt, (2,)),
+        #     ho_rms * jr.normal(key_ho, (n_zernikes - 3,)),
+        # ])
 
         ### Apply Zernike aberration to pupil-plane wavefront
         sim.optics = sim.optics.set(
             "aperture.coefficients",
-            zernike_coeffs,
+            zernike_coef_array[i,:]
         )
 
         ### Propagate point source through optics to focal plane
@@ -105,7 +120,7 @@ def generate_lp_from_zernikes(
         )
 
         ## Convert to NumPy arrays and store result
-        all_zernikes.append(np.array(zernike_coeffs))
+        all_zernikes.append(np.array(zernike_coef_array[i,:]))
         all_total_coupling.append(np.array(total_coupling))
         all_lp_powers.append(np.array(lp_powers))
         all_lp_coeffs.append(np.array(lp_coeffs))
