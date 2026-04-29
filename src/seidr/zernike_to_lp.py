@@ -28,6 +28,7 @@ def generate_temporal_lp_from_zernikes(
     min_rms_perterm=0.05,
     smooth_amt=7,
     return_fields=True,
+    return_wfs=True,
 ):
     """
     Generate point-source PSFs using SeidrSim, distorted by random Zernike
@@ -71,6 +72,7 @@ def generate_temporal_lp_from_zernikes(
     all_lp_powers = []
     all_lp_coeffs = []
     all_fields = [] if return_fields else None
+    all_pupil_wfs = [] if return_wfs else None
 
     ## Generate Zernike coefficient wavefront error RMS values 
     # using Gaussian kernel smoothing
@@ -105,6 +107,11 @@ def generate_temporal_lp_from_zernikes(
             zernike_coef_array[i,:]
         )
 
+        pupil_wf = sim.make_pupil_wavefront(
+            np.array(zernike_coef_array[i,:]),
+            return_phase=True,
+        )
+
         ### Propagate point source through optics to focal plane
         # Returns the complex focal-plane field:
         # E(x, y) = A(x, y) exp(i phi(x, y))
@@ -128,12 +135,15 @@ def generate_temporal_lp_from_zernikes(
         if return_fields:
             all_fields.append(np.array(field))
 
+        if return_wfs:
+            all_pupil_wfs.append(np.array(pupil_wf))
+
     ## Reset to base, unaberrated state
     sim.remove_aberrations()
 
     ## Combine outputs ** ADD wavefronts! **
     results = {
-        "zernikes": np.array(all_zernikes),
+        "zernike_coeffs": np.array(all_zernikes),
         "total_coupling": np.array(all_total_coupling),
         "lp_powers": np.array(all_lp_powers),
         "lp_coeffs": np.array(all_lp_coeffs),
@@ -143,6 +153,9 @@ def generate_temporal_lp_from_zernikes(
     }
 
     if return_fields:
-        results["fields"] = np.array(all_fields)
+        results["psf_fields"] = np.array(all_fields)
+    
+    if return_wfs:
+        results["pupil_wfs"] = np.array(all_pupil_wfs)
 
     return sim, results

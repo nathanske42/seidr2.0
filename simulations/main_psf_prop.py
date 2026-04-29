@@ -8,92 +8,31 @@ import numpy as np
 import jax.numpy as jnp
 import jax.random as jr
 import matplotlib.pyplot as plt
+import datetime
 
 from seidr.zernike_to_lp import generate_temporal_lp_from_zernikes
-from seidr.seidr_functions_misc import make_psf_lp_video
+from seidr.seidr_functions_misc import plot_wf_psf_zernike_lp, \
+    make_wf_psf_video
 
+#%%########################################################################
+### Filenames ###
 
-#%%###########################################################################
-### Define Mode Orders ###
+outname_datetime = datetime.datetime.now().strftime("%Y%m%d-%H%M")
 
-# LP modes
-lp_mode_labels = {
-    0: "LP01",
-    1: "LP02",
-    2: "LP03",
-    3: "LP11a",
-    4: "LP11b",
-    5: "LP12a",
-    6: "LP12b",
-    7: "LP13a",
-    8: "LP13b",
-    9: "LP21a",
-    10: "LP21b",
-    11: "LP22a",
-    12: "LP22b",
-    13: "LP31a",
-    14: "LP31b",
-    15: "LP32a",
-    16: "LP32b",
-    17: "LP41a",
-    18: "LP41b",
-}
+dir = "/import/roci1/nlon0790/Results/psf_prop/"
+dir_plot = "/suphys/nlon0790/Documents/python_code/seidr2.0/figures/"
 
-# Zernike modes
-zernike_mode_labels = {
-    # 0th Radial
-    1: "Piston",
-    # 1st Radial
-    2: "Tilt X",
-    3: "Tilt Y",
-    # Second Radial
-    4: "Defocus",
-    5: "Astig X",
-    6: "Astig Y",
-    # Third Radial
-    7: "Coma X",
-    8: "Coma Y",
-    9: "Trefoil X",
-    10: "Trefoil Y",
-    # Fourth Radial
-    11: "Spherical",
-    12: "2nd Astig X",
-    13: "2nd Astig Y",
-    14: "Quadrafoil X",
-    15: "Quadrafoil Y",
-    # Fifth Radial
-    16: "2nd Coma X",
-    17: "2nd Coma Y",
-    18: "2nd Trefoil X",
-    19: "2nd Trefoil Y",
-    20: "Pentafoil X",
-    21: "Pentafoil Y",
-    # Sixth Radial
-    22: "2nd Spherical",
-    23: "3rd Coma X",
-    24: "3rd Coma Y",
-    25: "3rd Astig X",
-    26: "3rd Astig Y",
-    27: "Hexafoil X",
-    28: "Hexafoil Y",
-    # Seventh Radial
-    29: "4th Coma X",
-    30: "4th Coma Y",
-    31: "4th Astig X",
-    32: "4th Astig Y",
-    33: "3rd Trefoil X",
-    34: "3rd Trefoil Y",
-    35: "Heptafoil X",
-    36: "Heptafoil Y",
-}
+f_data = dir + "seidr_wf_psf_lp_dataset_test.npz" # + outname_datetime + ".npz"
 
-# hmspl7c_modes = [0, 1, 3, 4, 9, 10]
+f_plot = dir_plot + "seidr_wf_psf_lp_example.pdf" #+ outname_datetime + ".pdf"
+f_video = dir_plot + "seidr_wf_psf_lp_evolution.gif" #+ outname_datetime + ".gif"
+
 
 #%%########################################################################
 ### Set HMSPL and Simulation Parameters ##
 
 ## Simulation parameters
-n_sims = 100 # number of simulations to run
+n_sims = 1000 # number of simulations to run
 
 wavel = 1.55 # wavelenth [um]
 
@@ -135,10 +74,9 @@ min_rms_per_mode = 1e-8 #0.05
 # tiptilt_rms = 1e-7 # m
 # ho_rms = 5e-8 # m
 
-save_data = False # whether to save the generated dataset to disk
-
-plot_video = True # whether to make a video of the PSF and LP power evolution
-save_video = True # whether to save the video to disk
+save_data = True # whether to save the generated dataset to disk
+plot_example = False # whether to plot one example of the generated PSF, wavefront, and LP powers
+save_video = False # whether to save the video to disk
 
 #%%
 if __name__ == "__main__":
@@ -161,55 +99,29 @@ if __name__ == "__main__":
         max_rms_perterm=max_rms_per_mode,
         min_rms_perterm=min_rms_per_mode,
         smooth_amt=smooth_amt,
-        return_fields=True
+        return_fields=True,
+        return_wfs=True,
     )
 
     print("powers shape :", results["lp_powers"].shape)
     print("coeffs shape :", results["lp_coeffs"].shape)
-    print("fields shape :", results["fields"].shape)
+    print("fields shape :", results["psf_fields"].shape)
+    print("pupil wfs shape :", results["pupil_wfs"].shape)
     print("number of LP modes :", results["nmodes"])
+    print("zernike coeffs shape :", results["zernike_coeffs"].shape)
 
     ##########################################################################
     ### Plotting ###
 
     ## Plot one example
-    idx = 0
-    field = results["fields"][idx]
+    idx_rand = np.random.randint(0, n_sims) # pick a random simulation to plot
 
-    plt.figure(figsize=(12, 4))
+    if plot_example:
+        plot_wf_psf_zernike_lp(results, idx=idx_rand, save_plot=True,
+                               fname_plot=f_plot)
 
-    plt.subplot(1, 3, 1)
-    plt.imshow(np.abs(field)**2)
-    plt.title("PSF intensity at HMSPL input")
-    plt.colorbar()
-
-    plt.subplot(1, 3, 2)
-    plt.imshow(np.angle(field), cmap="twilight", vmin=-np.pi, vmax=np.pi)
-    plt.title("PSF phase")
-    plt.colorbar()
-
-    plt.subplot(1, 3, 3)
-    plt.bar(np.arange(results["nmodes"]), results["lp_powers"][idx])
-    plt.xticks(np.arange(results["nmodes"]), results["modelabels"], rotation=90)
-    plt.title("LP modal powers")
-    plt.tight_layout()
-    plt.show()
-
-    ## Plot Zernike coefficients
-    plt.figure(1)
-    plt.plot(results["zernikes"][:100,:], '-o',markersize=2)
-    plt.xlabel('Simulation Step')
-    plt.ylabel('Zernike Coefficient Value')
-    # plt.ylim([-1, 1])
-    plt.grid(':', linewidth=0.5, alpha=0.5)
-    plt.legend(['%s' % (zernike_mode_labels[k]) for k in range(1, n_zernikes+1)],
-            loc='best', 
-            fontsize=8,
-            ncol=4)
-    plt.show()
-
-    if plot_video:
-        make_psf_lp_video(results, outname="psf_lp_evolution.gif", 
+    if save_video:
+        make_wf_psf_video(results, outname=f_video,
                           save_video=save_video, fps=30, dpi=150)
 
 
@@ -217,12 +129,71 @@ if __name__ == "__main__":
     ### Save Dataset ###
     if save_data:
         np.savez(
-            "seidr_option1_lp_dataset.npz",
+            f_data,
             total_coupling=results["total_coupling"],
-            powers=results["powers"],
-            coeffs=results["coeffs"],
-            zernikes=results["zernikes"],
+            lp_powers=results["lp_powers"],
+            lp_coeffs=results["lp_coeffs"],
+            zernike_coeffs=results["zernike_coeffs"],
             modelabels=results["modelabels"],
-            fields=results["fields"],
+            psf_fields=results["psf_fields"],
+            pupil_wfs=results["pupil_wfs"],
         )
+
+        print(f"Saved dataset to {f_data}")
 # %%
+
+# plt.figure(figsize=(12, 4))
+
+# plt.subplot(1, 3, 1)
+# plt.imshow(np.abs(field)**2)
+# plt.title("PSF intensity at HMSPL input")
+# plt.colorbar()
+
+# plt.subplot(1, 3, 2)
+# plt.imshow(np.angle(field), cmap="twilight", vmin=-np.pi, vmax=np.pi)
+# plt.title("PSF phase")
+# plt.colorbar()
+
+# plt.subplot(1, 3, 3)
+# plt.bar(np.arange(results["nmodes"]), results["lp_powers"][idx])
+# plt.xticks(np.arange(results["nmodes"]), results["modelabels"], rotation=90)
+# plt.title("LP modal powers")
+# plt.tight_layout()
+# plt.show()
+
+ # field = results["fields"][idx_rand]
+    # wf = results["pupil_wfs"][idx_rand]
+    # plt.figure(figsize=(12, 4))
+
+    # plt.subplot(1, 3, 1)
+    # plt.imshow(wf, cmap="twilight", 
+    #            vmin=-np.pi, vmax=np.pi)
+    # plt.title("Wavefront")
+    # plt.colorbar()
+
+    # plt.subplot(1, 3, 2)
+    # plt.imshow(np.abs(field)**2)
+    # plt.title("PSF intensity at HMSPL input")
+    # plt.colorbar()
+
+    # plt.subplot(1, 3, 3)
+    # plt.bar(np.arange(results["nmodes"]), results["lp_powers"][idx])
+    # plt.xticks(np.arange(results["nmodes"]), results["modelabels"], rotation=90)
+    # plt.title("LP modal powers")
+    # plt.tight_layout()
+    # plt.show()
+
+
+
+    # ## Plot Zernike coefficients
+    # plt.figure(1)
+    # plt.plot(results["zernikes"][:100,:], '-o',markersize=2)
+    # plt.xlabel('Simulation Step')
+    # plt.ylabel('Zernike Coefficient Value')
+    # # plt.ylim([-1, 1])
+    # plt.grid(':', linewidth=0.5, alpha=0.5)
+    # plt.legend(['%s' % (zernike_mode_labels[k]) for k in range(1, n_zernikes+1)],
+    #         loc='best', 
+    #         fontsize=8,
+    #         ncol=4)
+    # plt.show()

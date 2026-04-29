@@ -100,6 +100,12 @@ class SeidrSim:
         coords = dlu.pixel_coords(self.wf_npixels, self.pupil_diameter)
         basis = dlu.zernike_basis(zernike_indexes, coords, self.pupil_diameter)
 
+        ## Store Zernike seeing information -> added NKL
+        self.pupil_coords = coords
+        self.pupil_mask = circle
+        self.zernike_indexes = zernike_indexes
+        self.zernike_basis = basis
+
         layers = [
             ("aperture", dl.layers.BasisOptic(basis, circle, coeffs, 
                                               normalise=True))
@@ -150,6 +156,41 @@ class SeidrSim:
             return_abspower=True,
             complex=is_complex,
         )[0:2]
+
+
+    ##########################################################################
+    def make_pupil_wavefront(self, zernike_coeffs, return_phase=True):
+        """
+        Reconstruct the pupil-plane wavefront from Zernike coefficients.
+
+        Parameters
+        ----------
+        zernike_coeffs : array
+            Zernike coefficients, same ordering used by the aperture BasisOptic.
+
+        return_phase : bool
+            If True, return phase in radians.
+            If False, return OPD / wavefront error in metres.
+
+        Returns
+        -------
+        pupil_wf : array
+            Pupil-plane wavefront map.
+        """
+
+        opd = np.sum(
+            self.zernike_basis * zernike_coeffs[:, None, None],
+            axis=0,
+        )
+
+        opd = np.where(self.pupil_mask, opd, np.nan)
+
+        if return_phase:
+            wavelength_m = self.wavel * 1e-6
+            phase = 2 * np.pi * opd / wavelength_m
+            return phase
+
+        return opd
 
 
     ##########################################################################

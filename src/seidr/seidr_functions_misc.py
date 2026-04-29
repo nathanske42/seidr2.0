@@ -62,7 +62,7 @@ def load_lb_transfer_matrix(f_path, f_pl_name,
         as calculated using lightbea.
     """
 
-    f_name = f_path + f_pl_name + '_C_lm_array__wl=' + str(wl) \
+    f_name = f_path + f_pl_name + '_C_lm_array_wl=' + str(wl) \
         + '_rms=' + str(r_ms) + '_ds=' + str(ds) + '_dz=' + str(dz) \
         + '_rv=' + str(rv) + '_xyw=' + str(xywidth) + '_zlen=' + str(z_len) \
         + '_tr=' + str(tr) + '.h5'
@@ -136,81 +136,399 @@ def zernike_rms_per_mode(max_rms_perterm, min_rms_perterm, n_zernikes):
 
 
 ##############################################################################
-def make_psf_lp_video(results, outname="psf_lp_evolution.gif", 
-                      save_video=False, fps=15, dpi=150):
+# def make_psf_lp_video(results, outname="psf_lp_evolution.gif", 
+#                       save_video=False, fps=15, dpi=150):
+
+#     fields = np.asarray(results["fields"])
+#     lp_powers = np.asarray(results["lp_powers"])
+#     modelabels = np.asarray(results["modelabels"])
+#     nmodes = int(results["nmodes"])
+
+#     n_sims = fields.shape[0]
+
+#     # Fixed limits so the movie does not flicker frame-to-frame
+#     intensity_all = np.abs(fields)**2
+#     intensity_vmax = np.max(intensity_all)
+#     lp_vmax = np.max(lp_powers)
+
+#     fig = plt.figure(figsize=(12, 4))
+
+#     # ------------------------------------------------------------------
+#     # Panel 1: PSF intensity
+#     # ------------------------------------------------------------------
+#     ax1 = plt.subplot(1, 3, 1)
+#     im1 = ax1.imshow(
+#         intensity_all[0],
+#         origin="lower",
+#         vmin=0,
+#         vmax=intensity_vmax,
+#     )
+#     ax1.set_title("PSF intensity at HMSPL input")
+#     cbar1 = plt.colorbar(im1, ax=ax1)
+
+#     # ------------------------------------------------------------------
+#     # Panel 2: PSF phase
+#     # ------------------------------------------------------------------
+#     ax2 = plt.subplot(1, 3, 2)
+#     im2 = ax2.imshow(
+#         np.angle(fields[0]),
+#         origin="lower",
+#         cmap="twilight",
+#         vmin=-np.pi,
+#         vmax=np.pi,
+#     )
+#     ax2.set_title("PSF phase")
+#     cbar2 = plt.colorbar(im2, ax=ax2)
+
+#     # ------------------------------------------------------------------
+#     # Panel 3: LP modal powers
+#     # ------------------------------------------------------------------
+#     ax3 = plt.subplot(1, 3, 3)
+#     x = np.arange(nmodes)
+#     bars = ax3.bar(x, lp_powers[0])
+#     ax3.set_xticks(x)
+#     ax3.set_xticklabels(modelabels[:nmodes], rotation=90)
+#     ax3.set_ylim(0, 1.05 * lp_vmax)
+#     ax3.set_title("LP modal powers")
+
+#     frame_title = fig.suptitle(f"Simulation 0 / {n_sims - 1}")
+
+#     plt.tight_layout()
+
+#     def update(idx):
+#         field = fields[idx]
+
+#         # Update PSF intensity
+#         im1.set_data(np.abs(field)**2)
+
+#         # Update PSF phase
+#         im2.set_data(np.angle(field))
+
+#         # Update LP bar heights
+#         for bar, height in zip(bars, lp_powers[idx]):
+#             bar.set_height(height)
+
+#         frame_title.set_text(f"Simulation {idx} / {n_sims - 1}")
+
+#         return [im1, im2, frame_title, *bars]
+
+#     anim = FuncAnimation(
+#         fig,
+#         update,
+#         frames=n_sims,
+#         interval=1000 / fps,
+#         blit=False,
+#     )
+
+#     if save_video:
+#         writer = PillowWriter(fps=fps)
+#         # else:
+#         #     writer = FFMpegWriter(fps=fps, bitrate=3000)
+
+#         anim.save(outname, writer=writer, dpi=dpi)
+#         plt.close(fig)
+
+#         print(f"Saved video to {outname}")
+
+
+
+##############################################################################
+def make_n_distinct_colors(n):
+    """
+    Return n visually distinct RGBA colours.
+    """
+    return plt.cm.turbo(np.linspace(0, 1, n, endpoint=False))
+
+
+##############################################################################
+def plot_wf_psf_zernike_lp(
+    results,
+    idx=0,
+    figsize=(12, 10),
+    wf_key="pupil_wfs",
+    zernike_key="zernikes",
+    power_key="lp_powers",
+    save_plot=False,
+    fname_plot='wf_psf_zernike_lp_example.png'
+):
+    """
+    2x2 layout with aligned columns and square panels.
+
+        Top-left     : Pupil wavefront
+        Top-right    : PSF intensity
+        Bottom-left  : Zernike coefficient bar chart
+        Bottom-right : LP modal power bar chart
+    """
+
+    field = np.asarray(results["fields"][idx])
+    wf = np.asarray(results[wf_key][idx])
+    z = np.asarray(results[zernike_key][idx])
+    lp = np.asarray(results[power_key][idx])
+
+    nmodes = int(results["nmodes"])
+    modelabels = np.asarray(results["modelabels"])
+
+    # Colour sets for bars
+    z_colors = make_n_distinct_colors(len(z))
+    lp_colors = make_n_distinct_colors(nmodes)
+
+    fig = plt.figure(figsize=figsize, constrained_layout=True)
+    gs = fig.add_gridspec(
+        2, 4,
+        width_ratios=[1, 0.05, 1, 0.05],
+        height_ratios=[1, 1],
+    )
+
+    # ==========================================================
+    # Top-left : Pupil wavefront
+    # ==========================================================
+    ax00 = fig.add_subplot(gs[0, 0])
+    cax00 = fig.add_subplot(gs[0, 1])
+
+    im1 = ax00.imshow(
+        wf,
+        cmap="twilight",
+        vmin=-np.pi,
+        vmax=np.pi,
+        origin="lower",
+        aspect="equal",
+    )
+    ax00.set_title("Wavefront")
+    ax00.set_xticks([])
+    ax00.set_yticks([])
+    ax00.set_box_aspect(1)
+
+    cb1 = fig.colorbar(im1, cax=cax00)
+    cb1.ax.set_title("phase [rad]", fontsize=10, pad=8)
+
+    # ==========================================================
+    # Top-right : PSF intensity
+    # ==========================================================
+    ax01 = fig.add_subplot(gs[0, 2])
+    cax01 = fig.add_subplot(gs[0, 3])
+
+    im2 = ax01.imshow(
+        np.abs(field)**2,
+        origin="lower",
+        aspect="equal",
+    )
+    ax01.set_title("PSF at HMSPL Input")
+    ax01.set_xticks([])
+    ax01.set_yticks([])
+    ax01.set_box_aspect(1)
+
+    cb2 = fig.colorbar(im2, cax=cax01)
+    cb2.ax.set_title("intensity", fontsize=10, pad=8)
+
+    # ==========================================================
+    # Bottom-left : Zernike coefficients
+    # ==========================================================
+    ax10 = fig.add_subplot(gs[1, 0])
+    zx = np.arange(len(z))
+
+    ax10.bar(zx, z, width=0.8, color=z_colors)
+    ax10.set_title("Zernike Coefficients")
+    ax10.set_xlabel("Mode Index")
+    ax10.set_ylabel("Coefficient")
+    ax10.set_xticks(zx)
+    ax10.set_xticklabels(zx + 1, rotation=90)
+    ax10.grid(":", linewidth=0.5, alpha=0.4)
+    ax10.set_box_aspect(1)
+
+    ax_blank1 = fig.add_subplot(gs[1, 1])
+    ax_blank1.axis("off")
+
+    # ==========================================================
+    # Bottom-right : LP modal powers
+    # ==========================================================
+    ax11 = fig.add_subplot(gs[1, 2])
+    x = np.arange(nmodes)
+
+    ax11.bar(x, lp, width=0.8, color=lp_colors)
+    ax11.set_title("LP Modal Powers")
+    ax11.set_xlabel("LP Mode")
+    ax11.set_ylabel("Coupled Power")
+    ax11.set_xticks(x)
+    ax11.set_xticklabels(modelabels[:nmodes], rotation=90)
+    ax11.grid(":", linewidth=0.5, alpha=0.4)
+    ax11.set_box_aspect(1)
+
+    ax_blank2 = fig.add_subplot(gs[1, 3])
+    ax_blank2.axis("off")
+
+    if save_plot:
+        plt.savefig(fname_plot, dpi=150)
+
+    plt.show()
+
+
+##############################################################################
+def make_wf_psf_video(
+    results,
+    outname="wf_psf_evolution.gif",
+    save_video=False,
+    fps=30,
+    dpi=150,
+    figsize=(12, 10),
+    wf_key="pupil_wfs",
+    zernike_key="zernikes",
+    power_key="lp_powers",
+):
+    """
+    Create a video of the 2x2 evolution plot:
+
+        Top-left     : Pupil wavefront
+        Top-right    : PSF intensity
+        Bottom-left  : Zernike coefficient bar chart
+        Bottom-right : LP modal power bar chart
+    """
 
     fields = np.asarray(results["fields"])
-    lp_powers = np.asarray(results["lp_powers"])
+    pupil_wfs = np.asarray(results[wf_key])
+    zernikes = np.asarray(results[zernike_key])
+    lp_powers = np.asarray(results[power_key])
+
     modelabels = np.asarray(results["modelabels"])
     nmodes = int(results["nmodes"])
 
     n_sims = fields.shape[0]
 
-    # Fixed limits so the movie does not flicker frame-to-frame
     intensity_all = np.abs(fields)**2
-    intensity_vmax = np.max(intensity_all)
-    lp_vmax = np.max(lp_powers)
 
-    fig = plt.figure(figsize=(12, 4))
+    # Fixed colour/axis limits so the movie does not flicker
+    intensity_vmax = np.nanmax(intensity_all)
+    wf_vmin = -np.pi
+    wf_vmax = np.pi
 
-    # ------------------------------------------------------------------
-    # Panel 1: PSF intensity
-    # ------------------------------------------------------------------
-    ax1 = plt.subplot(1, 3, 1)
-    im1 = ax1.imshow(
+    z_absmax = np.nanmax(np.abs(zernikes))
+    lp_vmax = np.nanmax(lp_powers)
+
+    z_colors = make_n_distinct_colors(zernikes.shape[1])
+    lp_colors = make_n_distinct_colors(nmodes)
+
+    fig = plt.figure(figsize=figsize, constrained_layout=True)
+    gs = fig.add_gridspec(
+        2, 4,
+        width_ratios=[1, 0.05, 1, 0.05],
+        height_ratios=[1, 1],
+    )
+
+    # ==========================================================
+    # Top-left : Pupil wavefront
+    # ==========================================================
+    ax00 = fig.add_subplot(gs[0, 0])
+    cax00 = fig.add_subplot(gs[0, 1])
+
+    im_wf = ax00.imshow(
+        pupil_wfs[0],
+        cmap="twilight",
+        vmin=wf_vmin,
+        vmax=wf_vmax,
+        origin="lower",
+        aspect="equal",
+    )
+    ax00.set_title("Wavefront")
+    ax00.set_xticks([])
+    ax00.set_yticks([])
+    ax00.set_box_aspect(1)
+
+    cb1 = fig.colorbar(im_wf, cax=cax00)
+    cb1.ax.set_title("phase [rad]", fontsize=10, pad=8)
+
+    # ==========================================================
+    # Top-right : PSF intensity
+    # ==========================================================
+    ax01 = fig.add_subplot(gs[0, 2])
+    cax01 = fig.add_subplot(gs[0, 3])
+
+    im_psf = ax01.imshow(
         intensity_all[0],
         origin="lower",
         vmin=0,
         vmax=intensity_vmax,
+        aspect="equal",
     )
-    ax1.set_title("PSF intensity at HMSPL input")
-    cbar1 = plt.colorbar(im1, ax=ax1)
+    ax01.set_title("PSF at HMSPL Input")
+    ax01.set_xticks([])
+    ax01.set_yticks([])
+    ax01.set_box_aspect(1)
 
-    # ------------------------------------------------------------------
-    # Panel 2: PSF phase
-    # ------------------------------------------------------------------
-    ax2 = plt.subplot(1, 3, 2)
-    im2 = ax2.imshow(
-        np.angle(fields[0]),
-        origin="lower",
-        cmap="twilight",
-        vmin=-np.pi,
-        vmax=np.pi,
+    cb2 = fig.colorbar(im_psf, cax=cax01)
+    cb2.ax.set_title("intensity", fontsize=10, pad=8)
+
+    # ==========================================================
+    # Bottom-left : Zernike coefficients
+    # ==========================================================
+    ax10 = fig.add_subplot(gs[1, 0])
+    ax10.axhline(y=0, xmin=0, xmax=len(zernikes)+1,
+                 color="k", 
+                 linestyle="--", 
+                 linewidth=0.5, 
+                 alpha=0.7)
+    zx = np.arange(zernikes.shape[1])
+
+    z_bars = ax10.bar(
+        zx,
+        zernikes[0],
+        width=0.8,
+        color=z_colors,
     )
-    ax2.set_title("PSF phase")
-    cbar2 = plt.colorbar(im2, ax=ax2)
+    ax10.set_title("Zernike Coefficients")
+    ax10.set_xlabel("Mode Index")
+    ax10.set_ylabel("Coefficient")
+    ax10.set_xticks(zx)
+    ax10.set_xticklabels(zx + 1, rotation=90)
+    ax10.set_ylim(-1.05 * z_absmax, 1.05 * z_absmax)
+    # ax10.grid(":", linewidth=0.5, alpha=0.4)
+    ax10.set_box_aspect(1)
 
-    # ------------------------------------------------------------------
-    # Panel 3: LP modal powers
-    # ------------------------------------------------------------------
-    ax3 = plt.subplot(1, 3, 3)
+    ax_blank1 = fig.add_subplot(gs[1, 1])
+    ax_blank1.axis("off")
+
+    # ==========================================================
+    # Bottom-right : LP modal powers
+    # ==========================================================
+    ax11 = fig.add_subplot(gs[1, 2])
     x = np.arange(nmodes)
-    bars = ax3.bar(x, lp_powers[0])
-    ax3.set_xticks(x)
-    ax3.set_xticklabels(modelabels[:nmodes], rotation=90)
-    ax3.set_ylim(0, 1.05 * lp_vmax)
-    ax3.set_title("LP modal powers")
+
+    lp_bars = ax11.bar(
+        x,
+        lp_powers[0],
+        width=0.8,
+        color=lp_colors,
+    )
+    ax11.set_title("LP Modal Powers")
+    ax11.set_xlabel("LP Mode")
+    ax11.set_ylabel("Coupled Power")
+    ax11.set_xticks(x)
+    ax11.set_xticklabels(modelabels[:nmodes], rotation=90)
+    ax11.set_ylim(0, 1.05 * lp_vmax)
+    # ax11.grid(":", linewidth=0.5, alpha=0.4)
+    ax11.set_box_aspect(1)
+
+    ax_blank2 = fig.add_subplot(gs[1, 3])
+    ax_blank2.axis("off")
 
     frame_title = fig.suptitle(f"Simulation 0 / {n_sims - 1}")
 
-    plt.tight_layout()
-
     def update(idx):
-        field = fields[idx]
+        # Update wavefront
+        im_wf.set_data(pupil_wfs[idx])
 
         # Update PSF intensity
-        im1.set_data(np.abs(field)**2)
+        im_psf.set_data(intensity_all[idx])
 
-        # Update PSF phase
-        im2.set_data(np.angle(field))
+        # Update Zernike bar heights
+        for bar, height in zip(z_bars, zernikes[idx]):
+            bar.set_height(height)
 
         # Update LP bar heights
-        for bar, height in zip(bars, lp_powers[idx]):
+        for bar, height in zip(lp_bars, lp_powers[idx]):
             bar.set_height(height)
 
         frame_title.set_text(f"Simulation {idx} / {n_sims - 1}")
 
-        return [im1, im2, frame_title, *bars]
+        return [im_wf, im_psf, frame_title, *z_bars, *lp_bars]
 
     anim = FuncAnimation(
         fig,
@@ -221,7 +539,8 @@ def make_psf_lp_video(results, outname="psf_lp_evolution.gif",
     )
 
     if save_video:
-        writer = PillowWriter(fps=fps)
+        if outname.lower().endswith(".gif"):
+            writer = PillowWriter(fps=fps)
         # else:
         #     writer = FFMpegWriter(fps=fps, bitrate=3000)
 
@@ -229,3 +548,7 @@ def make_psf_lp_video(results, outname="psf_lp_evolution.gif",
         plt.close(fig)
 
         print(f"Saved video to {outname}")
+    else:
+        plt.show()
+
+    return anim
