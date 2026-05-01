@@ -233,11 +233,24 @@ def zernike_rms_per_mode(max_rms_perterm, min_rms_perterm, n_zernikes):
 
 
 ##############################################################################
-def make_n_distinct_colors(n):
+def make_n_distinct_colors(n, cmap="turbo"):
     """
-    Return n visually distinct RGBA colours.
+    Return n visually distinct RGBA colours from a given colormap.
+
+    Parameters
+    ----------
+    n : int
+        Number of colours.
+    cmap : str or Colormap
+        Matplotlib colormap name or object (e.g. "viridis", "plasma", plt.cm.tab10).
+
+    Returns
+    -------
+    colors : (n, 4) ndarray
+        RGBA colours.
     """
-    return plt.cm.turbo(np.linspace(0, 1, n, endpoint=False))
+    cmap_obj = plt.get_cmap(cmap)
+    return cmap_obj(np.linspace(0, 1, n, endpoint=False))
 
 
 ##############################################################################
@@ -246,7 +259,7 @@ def plot_wf_psf_zernike_lp(
     idx=0,
     figsize=(12, 10),
     wf_key="pupil_wfs",
-    zernike_key="zernikes",
+    zernike_key="zernike_coeffs",
     power_key="lp_powers",
     save_plot=False,
     fname_plot='wf_psf_zernike_lp_example.png'
@@ -269,8 +282,8 @@ def plot_wf_psf_zernike_lp(
     modelabels = np.asarray(results["modelabels"])
 
     # Colour sets for bars
-    z_colors = make_n_distinct_colors(len(z))
-    lp_colors = make_n_distinct_colors(nmodes)
+    z_colors = make_n_distinct_colors(len(z), cmap="turbo")
+    lp_colors = make_n_distinct_colors(nmodes, cmap="magma")
 
     fig = plt.figure(figsize=figsize, constrained_layout=True)
     gs = fig.add_gridspec(
@@ -363,15 +376,16 @@ def plot_wf_psf_zernike_lp(
 
 
 ##############################################################################
-def make_wf_psf_video(
+def make_wf_psf_video_square(
     results,
     outname="wf_psf_evolution.gif",
     save_video=False,
     fps=30,
     dpi=150,
     figsize=(12, 10),
+    psf_key="psf_fields",
     wf_key="pupil_wfs",
-    zernike_key="zernikes",
+    zernike_key="zernike_coeffs",
     power_key="lp_powers",
 ):
     """
@@ -383,7 +397,7 @@ def make_wf_psf_video(
         Bottom-right : LP modal power bar chart
     """
 
-    fields = np.asarray(results["fields"])
+    fields = np.asarray(results[psf_key])
     pupil_wfs = np.asarray(results[wf_key])
     zernikes = np.asarray(results[zernike_key])
     lp_powers = np.asarray(results[power_key])
@@ -403,8 +417,8 @@ def make_wf_psf_video(
     z_absmax = np.nanmax(np.abs(zernikes))
     lp_vmax = np.nanmax(lp_powers)
 
-    z_colors = make_n_distinct_colors(zernikes.shape[1])
-    lp_colors = make_n_distinct_colors(nmodes)
+    z_colors = make_n_distinct_colors(zernikes.shape[1], cmap="turbo")
+    lp_colors = make_n_distinct_colors(nmodes, cmap="magma")
 
     fig = plt.figure(figsize=figsize, constrained_layout=True)
     gs = fig.add_gridspec(
@@ -547,6 +561,213 @@ def make_wf_psf_video(
         anim.save(outname, writer=writer, dpi=dpi)
         plt.close(fig)
 
+        print(f"Saved video to {outname}")
+    else:
+        plt.show()
+
+    return anim
+
+
+##############################################################################
+def make_wf_psf_lp_pl_video_row(
+    results,
+    outname="zernike_wf_psf_lp_pl_evolution.gif",
+    save_video=True,
+    fps=30,
+    dpi=150,
+    figsize=(22, 4.5),
+    psf_key="psf_fields",
+    wf_key="pupil_wfs",
+    zernike_key="zernike_coeffs",
+    lp_power_key="lp_powers",
+    pl_power_key="pl_powers",
+):
+    """
+    Create a 1x5 video:
+
+        1. Zernike coefficient bar chart
+        2. Pupil wavefront
+        3. PSF intensity at HMSPL input
+        4. LP modal power bar chart
+        5. PL output core power bar chart
+    """
+
+    fields = np.asarray(results[psf_key])
+    pupil_wfs = np.asarray(results[wf_key])
+    zernikes = np.asarray(results[zernike_key])
+    lp_powers = np.asarray(results[lp_power_key])
+    pl_powers = np.asarray(results[pl_power_key])
+
+    modelabels = np.asarray(results["modelabels"])
+    nmodes = int(results["nmodes"])
+
+    n_sims = fields.shape[0]
+    n_zernikes = zernikes.shape[1]
+    n_pl_cores = pl_powers.shape[1]
+
+    intensity_all = np.abs(fields) ** 2
+
+    # Fixed limits to avoid flickering
+    z_absmax = np.nanmax(np.abs(zernikes))
+    wf_vmin, wf_vmax = -np.pi, np.pi
+    intensity_vmax = np.nanmax(intensity_all)
+    lp_vmax = np.nanmax(lp_powers)
+    pl_vmax = np.nanmax(pl_powers)
+
+    z_colors = make_n_distinct_colors(n_zernikes, cmap="turbo")
+    lp_colors = make_n_distinct_colors(nmodes, cmap="magma")
+    pl_colors = make_n_distinct_colors(n_pl_cores, cmap="cividis")
+
+    fig, axes = plt.subplots(
+        1, 5,
+        figsize=figsize,
+        constrained_layout=True,
+    )
+
+    # ----------------------------------------------------------
+    # 1. Zernike coefficients
+    # ----------------------------------------------------------
+    ax_z = axes[0]
+    zx = np.arange(n_zernikes)
+
+    z_bars = ax_z.bar(
+        zx,
+        zernikes[0],
+        width=0.8,
+        color=z_colors,
+    )
+    ax_z.set_title("Zernike Coefficients")
+    ax_z.set_xlabel("Mode Index")
+    ax_z.set_ylabel("Coefficient")
+    ax_z.set_xticks(zx)
+    ax_z.set_xticklabels(zx + 1, rotation=90)
+    ax_z.set_ylim(-1.05 * z_absmax, 1.05 * z_absmax)
+    # ax_z.grid(":", linewidth=0.5, alpha=0.4)
+    ax_z.set_box_aspect(1)
+
+    # ----------------------------------------------------------
+    # 2. Pupil wavefront
+    # ----------------------------------------------------------
+    ax_wf = axes[1]
+
+    im_wf = ax_wf.imshow(
+        pupil_wfs[0],
+        cmap="twilight",
+        vmin=wf_vmin,
+        vmax=wf_vmax,
+        origin="lower",
+        aspect="equal",
+    )
+    ax_wf.set_title("Wavefront")
+    ax_wf.set_xticks([])
+    ax_wf.set_yticks([])
+    ax_wf.set_box_aspect(1)
+
+    cb_wf = fig.colorbar(im_wf, ax=ax_wf, fraction=0.046, pad=0.04)
+    cb_wf.ax.set_title("phase [rad]", fontsize=9, pad=8)
+
+    # ----------------------------------------------------------
+    # 3. PSF intensity
+    # ----------------------------------------------------------
+    ax_psf = axes[2]
+
+    im_psf = ax_psf.imshow(
+        intensity_all[0],
+        origin="lower",
+        vmin=0,
+        vmax=intensity_vmax,
+        aspect="equal",
+    )
+    ax_psf.set_title("PSF Intensity")
+    ax_psf.set_xticks([])
+    ax_psf.set_yticks([])
+    ax_psf.set_box_aspect(1)
+
+    cb_psf = fig.colorbar(im_psf, ax=ax_psf, fraction=0.046, pad=0.04)
+    cb_psf.ax.set_title("intensity", fontsize=9, pad=8)
+
+    # ----------------------------------------------------------
+    # 4. LP modal powers
+    # ----------------------------------------------------------
+    ax_lp = axes[3]
+    lx = np.arange(nmodes)
+
+    lp_bars = ax_lp.bar(
+        lx,
+        lp_powers[0],
+        width=0.8,
+        color=lp_colors,
+    )
+    ax_lp.set_title("LP Modal Powers")
+    ax_lp.set_xlabel("LP Mode")
+    ax_lp.set_ylabel("Coupled Power")
+    ax_lp.set_xticks(lx)
+    ax_lp.set_xticklabels(modelabels[:nmodes], rotation=90)
+    ax_lp.set_ylim(0, 1.05 * lp_vmax)
+    # ax_lp.grid(":", linewidth=0.5, alpha=0.4)
+    ax_lp.set_box_aspect(1)
+
+    # ----------------------------------------------------------
+    # 5. PL output core powers
+    # ----------------------------------------------------------
+    ax_pl = axes[4]
+    px = np.arange(n_pl_cores)
+
+    pl_bars = ax_pl.bar(
+        px,
+        pl_powers[0],
+        width=0.8,
+        color=pl_colors,
+    )
+    ax_pl.set_title("PL Output Core Powers")
+    ax_pl.set_xlabel("Core Index")
+    ax_pl.set_ylabel("Power")
+    ax_pl.set_xticks(px)
+    ax_pl.set_xticklabels(px + 1)
+    ax_pl.set_ylim(0, 1.05 * pl_vmax)
+    # ax_pl.grid(":", linewidth=0.5, alpha=0.4)
+    ax_pl.set_box_aspect(1)
+
+    frame_title = fig.suptitle(f"Simulation 0 / {n_sims - 1}")
+
+    def update(idx):
+        im_wf.set_data(pupil_wfs[idx])
+        im_psf.set_data(intensity_all[idx])
+
+        for bar, height in zip(z_bars, zernikes[idx]):
+            bar.set_height(height)
+
+        for bar, height in zip(lp_bars, lp_powers[idx]):
+            bar.set_height(height)
+
+        for bar, height in zip(pl_bars, pl_powers[idx]):
+            bar.set_height(height)
+
+        frame_title.set_text(f"Simulation {idx} / {n_sims - 1}")
+
+        return [
+            im_wf,
+            im_psf,
+            frame_title,
+            *z_bars,
+            *lp_bars,
+            *pl_bars,
+        ]
+
+    anim = FuncAnimation(
+        fig,
+        update,
+        frames=n_sims,
+        interval=1000 / fps,
+        blit=False,
+    )
+
+    if save_video:
+        if outname.lower().endswith(".gif"):
+            writer = PillowWriter(fps=fps)
+
+        anim.save(outname, writer=writer, dpi=dpi)
+        plt.close(fig)
         print(f"Saved video to {outname}")
     else:
         plt.show()

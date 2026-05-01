@@ -1,6 +1,7 @@
 #%%###########################################################################
 """
-Generate PSFs for a lantern fiber, using the lanternfiber and SeidrSim classes 
+Generate PSFs for a lantern fiber, using the 
+lanternfiber and zernikePSF classes 
 """
 
 #%%########################################################################
@@ -10,9 +11,9 @@ import jax.random as jr
 import matplotlib.pyplot as plt
 import datetime
 
-from seidr.zernike_to_lp import generate_temporal_lp_from_zernikes
+from seidr.source2pl import source2pl_temporal
 from seidr.seidr_functions_misc import plot_wf_psf_zernike_lp, \
-    make_wf_psf_video
+    make_wf_psf_video_square, make_wf_psf_lp_pl_video_row
 
 #%%########################################################################
 ### Filenames ###
@@ -27,6 +28,9 @@ f_data = dir + "seidr_wf_psf_lp_dataset_test.npz" # + outname_datetime + ".npz"
 f_plot = dir_plot + "seidr_wf_psf_lp_example.pdf" #+ outname_datetime + ".pdf"
 f_video = dir_plot + "seidr_wf_psf_lp_evolution.gif" #+ outname_datetime + ".gif"
 
+## transfer matrix 
+f_pl_name = "hms-pl7c"
+f_pl_path = "/import/roci1/nlon0790/Results/hms-pl7/cores/"
 
 #%%########################################################################
 ### Set HMSPL and Simulation Parameters ##
@@ -67,23 +71,44 @@ n_clad_mm = 1.4345
 smooth_amt = 7 # Gaussian kernel samples / time steps
 
 # Vary RMS per zernike mode, with a linear drop-off from start to end mode
-max_rms_per_mode = 7e-8 #0.4 
-min_rms_per_mode = 1e-8 #0.05
+max_rms_per_mode = 7e-8 #0.4 [m]
+min_rms_per_mode = 1e-8 #0.05 [m]
 
 # ## Wavefront error RMS
 # tiptilt_rms = 1e-7 # m
 # ho_rms = 5e-8 # m
 
-save_data = True # whether to save the generated dataset to disk
+## Transfer Matrix Parameters
+calc_pl_outputs = True # whether to calculate PL outputs using the transfer matrix
+if calc_pl_outputs:
+    n_cores = 7
+    wavel = 1.55 # wavelenth [um]
+    r_ms = 0.559 # radius of mode selective core [um]
+    ds = 0.25 # x-y step size for LB sims [um]
+    dz = 2 # z-step size for LB sims [um]
+    rv = 1 # reference value for LB sims
+    xywidth = 135.0 # width of the simulation window [um]
+    z_len = 50000 # length of PL [um]
+    tr = 6.25 # taper ratio
+else:
+    f_pl_path = None
+    r_ms = None
+    ds = None
+    dz = None
+    rv = None
+    xywidth = None
+    z_len = None
+    tr = None
+
+save_data = False # whether to save the generated dataset to disk
 plot_example = False # whether to plot one example of the generated PSF, wavefront, and LP powers
-save_video = False # whether to save the video to disk
+save_video = True # whether to save the video to disk
 
 #%%
 if __name__ == "__main__":
     
-    sim, results = generate_temporal_lp_from_zernikes(
+    lf, results = source2pl_temporal(
         n_sims=n_sims,
-        # seed=1,
         wavel=wavel,
         f_number=f_number,
         pupil_diameter=pupil_diameter,
@@ -94,13 +119,20 @@ if __name__ == "__main__":
         wf_npixels=wf_npixels,
         psf_npixels=psf_npixels,
         n_zernikes=n_zernikes,
-        # tiptilt_rms =tiptilt_rms,
-        # ho_rms = ho_rms,
         max_rms_perterm=max_rms_per_mode,
         min_rms_perterm=min_rms_per_mode,
         smooth_amt=smooth_amt,
-        return_fields=True,
         return_wfs=True,
+        calc_pl_outputs=True,
+        f_pl_path=f_pl_path,
+        f_pl_name=f_pl_name,
+        r_core=r_ms,
+        ds=ds,
+        dz=dz,
+        rv=rv, 
+        xywidth=xywidth,
+        z_len=z_len, 
+        tr=tr,
     )
 
     print("powers shape :", results["lp_powers"].shape)
@@ -109,6 +141,9 @@ if __name__ == "__main__":
     print("pupil wfs shape :", results["pupil_wfs"].shape)
     print("number of LP modes :", results["nmodes"])
     print("zernike coeffs shape :", results["zernike_coeffs"].shape)
+
+    if calc_pl_outputs:
+        print("PL outputs shape :", results["pl_outputs"].shape)
 
     ##########################################################################
     ### Plotting ###
@@ -121,8 +156,12 @@ if __name__ == "__main__":
                                fname_plot=f_plot)
 
     if save_video:
-        make_wf_psf_video(results, outname=f_video,
+        make_wf_psf_video_square(results, outname=f_video,
                           save_video=save_video, fps=30, dpi=150)
+        
+        # make_wf_psf_lp_pl_video_row(results, 
+        #                             outname=f_video.replace(".gif", "_row.gif"),
+        #                             save_video=save_video, fps=30, dpi=150)
 
 
     ########################################################################
@@ -137,11 +176,32 @@ if __name__ == "__main__":
             modelabels=results["modelabels"],
             psf_fields=results["psf_fields"],
             pupil_wfs=results["pupil_wfs"],
+            pl_outputs=results["pl_outputs"] if calc_pl_outputs else None,
+            pl_powers=results["pl_powers"] if calc_pl_outputs else None,
         )
 
         print(f"Saved dataset to {f_data}")
-# %%
+#%%
 
+idx_example = np.random.randint(0, n_sims)
+plt.figure(figsize=(8, 4))
+plt.bar(range(n_cores), np.abs(results["pl_outputs"][idx_example, :])**2)
+plt.xlabel('Core Index')
+plt.ylabel('Output Intensity')
+plt.title('Propagation of PSF through PL - Example Simulation')
+plt.grid(':', linewidth=0.5, alpha=0.5)
+plt.show()
+
+
+#%%
+
+idx_example = np.random.randint(0, n_sims)
+
+print(np.sum(np.abs(results["psf_fields"][idx_example, :])**2))
+print(np.sum(results["lp_powers"][idx_example, :]))
+print(np.sum(np.abs(results["pl_outputs"][idx_example, :])**2))
+
+#%%
 # plt.figure(figsize=(12, 4))
 
 # plt.subplot(1, 3, 1)

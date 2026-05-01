@@ -18,25 +18,35 @@ cd seidr2.0
 pip install -e .
 ```
 
+seidr2.0 uses the fiber-imaging, which should also be installed:
+
+```bash
+git clone https://github.com/SAIL-Labs/fiber-imaging.git
+cd fiber-imaging
+pip install .
+```
+
 ### Structure
 
 ```
-seidr
-│   README.md   
+seidr2.0
+│   README.md
 │
-└───src
-│   │
-│   └───seidr
-│       │   __init__.py
-│       │   lanternfiber.py
-│       │   SeidrSim.py
-│       │   star_planet.py
+└───src/seidr/
+│       __init__.py
+│       source2pl.py              # end-to-end: wavefront → PSF → LP modes → PL outputs
+│       SeidrSim.py               # dLux-based optical propagation (legacy)
+│       seidr_functions_misc.py   # helper functions (smoothed random WFE, plotting, video)
+│       star_planet.py            # star/planet modelling (draft)
 │
+└───simulations/
+│       main_wf_psf_pl_prop.py    # temporal WF → PSF → LP → PL dataset generation
 │
-└───example
-│   │   example_kernel_nulling.py
-│   │   example_star_planet.py
-│
+└───examples/
+│       example_psf_pl_prop.py
+│       example_kernel_nulling.py
+│       example_star_planet.py
+│       example_make_cont_coeffs.py
 │
 ```
 
